@@ -6,7 +6,7 @@
 #include "entity_types.h"
 
 namespace apigen {
-	clang::PrintingPolicy &get_internal_type_printing_policy() {
+	clang::PrintingPolicy &get_cpp_printing_policy() {
 		static clang::PrintingPolicy _policy{clang::LangOptions()};
 		static bool _init = false;
 
@@ -52,6 +52,7 @@ namespace apigen {
 			entity,
 			function_entity,
 			method_entity,
+			constructor_entity,
 			user_type_entity,
 			enum_entity,
 			record_entity,
@@ -63,13 +64,6 @@ namespace apigen {
 
 
 	void entity::propagate_export(export_propagation_queue&, entity_registry&) {
-	}
-
-	void entity::append_environment_name(
-		std::string &s, clang::NamedDecl *decl, const entity_registry &reg, const naming_conventions &conv
-	) {
-		entity *et = reg.find_entity(decl);
-		append_with_sep(s, et ? et->get_declaration_name() : decl->getName().str(), conv.env_separator);
 	}
 
 	std::string entity::get_environment_name(
@@ -100,7 +94,7 @@ namespace apigen {
 				break;
 			}
 			if (auto *clsdecl = llvm::dyn_cast<clang::CXXRecordDecl>(*it); clsdecl) {
-				append_environment_name(res, clsdecl, reg, conv);
+				append_with_sep(res, reg.get_exported_name(clsdecl), conv.env_separator);
 				--clsc;
 				continue;
 			}

@@ -18,49 +18,10 @@
 namespace apigen {
 	class entity_registry;
 	struct export_propagation_queue;
+	struct naming_conventions;
 
 	/// Returns a \p clang::PrintingPolicy for printing internal types.
-	clang::PrintingPolicy &get_internal_type_printing_policy();
-
-	/// Dictates how objects in the generated code are named.
-	///
-	/// \todo Document each field.
-	struct naming_conventions {
-		std::string
-			host_function_name_pattern,
-			api_function_name_pattern,
-
-			api_enum_name_pattern,
-			api_enum_entry_name_pattern,
-
-			api_record_name_pattern,
-			api_move_struct_name_pattern, ///< Name pattern of move wrapper for structs.
-			api_templated_record_name_pattern,
-			api_templated_record_move_struct_name_pattern, ///< Name pattern of move wrapper for templated structs.
-
-			host_method_name_pattern,
-			api_method_name_pattern,
-
-
-			host_field_getter_name_pattern,
-			api_field_getter_name_pattern,
-
-			env_separator,
-
-			api_struct_name, ///< Name of the API struct.
-			/// The name of the class containing all API function implementations. This is mainly to make friend
-			/// declarations more convenient.
-			host_function_class_name,
-			host_init_api_function_name; ///< The name of the function used to initialize the API struct.
-
-		int
-			/// The number of namespaces levels, starting from top-level namespaces, that are prepended to the
-			/// environment name. If this is less than zero, then all namespace names will be added.
-			namespace_levels = -1,
-			/// The number of parent classes, starting from top-level classes, that are prepended to theenvironment
-			/// name. If this is less than zero, then all class names will be added.
-			parent_class_levels = -1;
-	};
+	clang::PrintingPolicy &get_cpp_printing_policy();
 
 
 	/// Specifies the kind of an entity through \ref entity::get_kind(). This exists since RTTI is disabled for clang.
@@ -73,8 +34,7 @@ namespace apigen {
 		field, ///< A field of a record.
 		function, ///< A function, possibly a method.
 		method, ///< A method.
-
-		max_value ///< The maximum value, used when generating the base table.
+		constructor ///< A constructor.
 	};
 	/// Dynamic version of \ref is_entity_base_of_v.
 	bool is_entity_base_of_dynamic(entity_kind base, entity_kind derived);
@@ -155,9 +115,9 @@ namespace apigen {
 			}
 			return qty.getTypePtr();
 		}
-		/// Returns the postfix of a type, given the list of \ref type_property produced by \ref strip_type(). Only
+		/// Returns the traits of a type, given the list of \ref type_property produced by \ref strip_type(). Only
 		/// pointers (including arrays) and \p const qualifiers are considered.
-		inline static std::string get_type_postfix(const std::vector<type_property> &props) {
+		inline static std::string get_type_traits(const std::vector<type_property> &props) {
 			std::string res;
 			for (type_property p : props) {
 				if ((p & type_property::const_flag) != type_property::empty) {
@@ -165,6 +125,23 @@ namespace apigen {
 				}
 				if ((p & type_property::pointer_flag) != type_property::empty) {
 					res += "*";
+				}
+			}
+			return res;
+		}
+		/// Returns a human-readable prefix for the given list of \ref type_property that's suitable to be used as part
+		/// of an identifier.
+		inline static std::string get_type_traits_identifier(const std::vector<type_property> &props) {
+			std::string res;
+			for (type_property p : props) {
+				if ((p & type_property::const_flag) != type_property::empty) {
+					res += 'c';
+				}
+				if ((p & type_property::reference_flag) != type_property::empty) {
+					res += 'r';
+				}
+				if ((p & type_property::pointer_flag) != type_property::empty) {
+					res += 'p';
 				}
 			}
 			return res;
@@ -189,31 +166,16 @@ namespace apigen {
 			switch (arg.getKind()) {
 			case clang::TemplateArgument::Type:
 				{
-					clang::QualType qty = arg.getAsType();
 					std::vector<type_property> typeprops;
-					const clang::Type *ty = strip_type(qty, &typeprops);
-					// type properties
-					std::string qual;
-					for (type_property prop : typeprops) {
-						if ((prop & type_property::const_flag) != type_property::empty) {
-							qual += 'c';
-						}
-						if ((prop & type_property::reference_flag) != type_property::empty) {
-							qual += 'r';
-						}
-						if ((prop & type_property::pointer_flag) != type_property::empty) {
-							qual += 'p';
-						}
-					}
-					// base type name
-					std::string corename;
+					const clang::Type *ty = strip_type(arg.getAsType(), &typeprops);
+					std::string name = get_type_traits_identifier(typeprops);
 					if (ty->isRecordType() || ty->isEnumeralType()) {
 						// TODO rename?
-						corename = ty->getAsTagDecl()->getName().str();
+						name = ty->getAsTagDecl()->getName().str();
 					} else {
-						corename = convert_into_identifier(clang::QualType(ty, 0).getAsString());
+						name = clang::QualType(ty, 0).getAsString();
 					}
-					return qual + corename;
+					return name;
 				}
 			case clang::TemplateArgument::NullPtr:
 				return "nullptr";
@@ -247,27 +209,21 @@ namespace apigen {
 			}
 			s += n;
 		}
-		/// Appends the name of the given \p clang::NamedDecl to the given string by calling \ref append_with_sep(). If
-		/// that \p NamdeDecl can be found in the \ref entity_registry, then the name returned by
-		/// \ref entity::get_declaration_name() will be used; otherwise uses the name of that \p NamedDecl.
-		static void append_environment_name(
-			std::string&, clang::NamedDecl*, const entity_registry&, const naming_conventions&
-		);
 		/// Returns a string representation of the environment (i.e., namespaces, parent classes) of the given
 		/// \p clang::Decl.
 		static std::string get_environment_name(clang::Decl*, const entity_registry&, const naming_conventions&);
 
 		/// Returns the name used when exporting this entity. If a substitute name is specified, \ref substitute_name
 		/// will be used; otherwise uses the name of \ref declaration.
-		std::string get_declaration_name() const {
-			return substitute_name.empty() ? declaration->getName().str() : substitute_name;
+		std::string get_exported_name() const {
+			return get_substitute_name().empty() ? declaration->getName().str() : get_substitute_name();
 		}
 
 
 		/// Called to register an appearance of this entity in the code. Registers all attributes of the declaration
 		/// via \ref consume_annotation().
 		virtual void register_declaration(clang::NamedDecl *decl) {
-			for (clang::Attr *attr : decl->getAttrs()) { // process annotations
+			for (clang::Attr *attr : decl->attrs()) { // process annotations
 				if (attr->getKind() == clang::attr::Kind::Annotate) {
 					auto *annotate = clang::cast<clang::AnnotateAttr>(attr);
 					if (!consume_annotation(annotate->getAnnotation())) {
@@ -296,13 +252,12 @@ namespace apigen {
 				return true;
 			}
 			if (anno.startswith(APIGEN_ANNOTATION_RENAME_PREFIX)) {
-				if (!substitute_name.empty()) {
+				size_t prefixlen = std::strlen(APIGEN_ANNOTATION_RENAME_PREFIX);
+				if (set_substitute_name(std::string(anno.begin() + prefixlen, anno.end()))) {
 					std::cerr <<
 						declaration->getName().str() <<
-						": substitute name " << substitute_name << " discarded\n";
+						": substitute name discarded (guess which)\n";
 				}
-				size_t prefixlen = std::strlen(APIGEN_ANNOTATION_RENAME_PREFIX);
-				substitute_name = std::string(anno.begin() + prefixlen, anno.end());
 				return true;
 			}
 			return false;
@@ -324,11 +279,24 @@ namespace apigen {
 		/// Exports statements to initialize a given API struct.
 		virtual void export_host_api_initializers(const entity_registry&, export_writer&, std::string_view) const;
 
+		/// Returns the substitute name.
+		const std::string &get_substitute_name() const {
+			return _substitute_name;
+		}
+		/// Sets the substitute name. Previously set names will be discarded.
+		///
+		/// \return Whether a different substitute name has been discarded.
+		bool set_substitute_name(std::string s) {
+			std::swap(_substitute_name, s);
+			return !s.empty() && _substitute_name != s;
+		}
+
 		clang::NamedDecl *declaration; ///< The canonical declaration of this entity.
-		std::string substitute_name; ///< The name used when exporting this entity.
 		bool
 			is_exported = false, ///< Indicates whether this entity is exported.
 			is_excluded = false; ///< Indicates if this entity should not be exported.
+	protected:
+		std::string _substitute_name; ///< The name used when exporting this entity.
 	};
 
 	/// Casts an \ref entity to another entity type. Asserts if the types don't match.

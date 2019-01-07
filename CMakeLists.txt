@@ -60,6 +60,8 @@ target_sources(apigen
 		enum_bitwise.h
 		export_writer.h
 		parsing.h
+		qualified_type.cpp
+		qualified_type.h
 		main.cpp)
 target_include_directories(apigen
 	PRIVATE

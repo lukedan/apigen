@@ -5,8 +5,11 @@
 #include <fmt/format.h>
 #include <fmt/ostream.h>
 
+#include <clang/AST/DeclFriend.h>
+
 #include "entity.h"
 #include "entity_registry.h"
+#include "qualified_type.h"
 
 namespace apigen {
 	class method_entity;
@@ -63,7 +66,7 @@ namespace apigen {
 		void cache_export_names(entity_registry &reg, const naming_conventions &conv) override {
 			std::string
 				env = get_environment_name(declaration, reg, conv),
-				enumname = get_declaration_name();
+				enumname = get_exported_name();
 			name = reg.global_scope.register_name(fmt::format(conv.api_enum_name_pattern, env, enumname));
 
 			auto *decl = llvm::cast<clang::EnumDecl>(declaration)->getDefinition();
@@ -101,7 +104,7 @@ namespace apigen {
 			return
 				clang::QualType(
 					llvm::cast<clang::CXXRecordDecl>(declaration)->getTypeForDecl(), 0
-				).getAsString(get_internal_type_printing_policy());
+				).getAsString(get_cpp_printing_policy());
 		}
 
 		/// Checks if this record should be exported recursively, and if this should be exported as a base class.
@@ -162,6 +165,7 @@ namespace apigen {
 							}
 						}
 					}
+
 					for (clang::CXXMethodDecl *method : def->methods()) {
 						if (entity *ent = reg.find_entity(method); ent) {
 							if (_should_export(method->getAccess()) && !ent->is_excluded) {
@@ -169,13 +173,28 @@ namespace apigen {
 							}
 						}
 					}
+
 					using record_iterator = clang::DeclContext::specific_decl_iterator<clang::CXXRecordDecl>;
-					record_iterator recend(def->decls_end());
-					for (record_iterator it(def->decls_begin()); it != recend; ++it) {
+					for (record_iterator it(def->decls_begin()), end(def->decls_end()); it != end; ++it) {
 						if (auto *ent = cast<record_entity>(reg.find_entity(*it)); ent) {
 							if (_should_export(it->getAccess()) && !ent->is_excluded) {
 								ent->is_recursive = true;
 								q.queue_exported_entity(*ent);
+							}
+						}
+					}
+
+					for (clang::FriendDecl *frnd : def->friends()) {
+						if (auto *func = llvm::dyn_cast_or_null<clang::FunctionDecl>(frnd->getFriendDecl()); func) {
+							if (func->isThisDeclarationADefinition()) {
+								if (auto *ent = reg.find_entity(func); ent) {
+									if (_should_export(func->getAccess()) && !ent->is_excluded) {
+										// TODO
+										// these function can only be accessed using ADL, i.e., one of the parameters
+										// must be of the class' type.
+										/*q.queue_exported_entity(*ent);*/
+									}
+								}
 							}
 						}
 					}
@@ -191,7 +210,7 @@ namespace apigen {
 		void cache_export_names(entity_registry &reg, const naming_conventions &conv) override {
 			std::string
 				envname = get_environment_name(declaration, reg, conv),
-				declname = get_declaration_name();
+				declname = get_exported_name();
 			name = reg.global_scope.register_name(fmt::format(conv.api_record_name_pattern, envname, declname));
 			move_struct_name = reg.global_scope.register_name(fmt::format(
 				conv.api_move_struct_name_pattern, envname, declname
@@ -228,7 +247,7 @@ namespace apigen {
 		explicit template_specialization_entity(clang::NamedDecl *decl) : record_entity(decl) {
 		}
 
-		// TODO different name and set of methods
+		// TODO different set of methods?
 
 		/// Caches the name of this template specialization.
 		void cache_export_names(entity_registry &reg, const naming_conventions &conv) override {
@@ -239,300 +258,13 @@ namespace apigen {
 			}
 			std::string
 				envname = get_environment_name(declaration, reg, conv),
-				declname = get_declaration_name();
+				declname = get_exported_name();
 			name = reg.global_scope.register_name(fmt::format(
 				conv.api_templated_record_name_pattern, envname, declname, args
 			));
 			move_struct_name = reg.global_scope.register_name(fmt::format(
 				conv.api_templated_record_move_struct_name_pattern, envname, declname, args
 			));
-		}
-	};
-
-	/// Stores information about the type of a parameter, a return value, or a field.
-	struct qualified_type {
-		/// The kind of a type.
-		enum class reference_kind {
-			invalid, ///< Default invalid value.
-			value, ///< Value.
-			lvalue_reference, ///< Lvalue reference.
-			pointer, ///< Pointer.
-			rvalue_reference_to_object, ///< Rvalue reference to an object.
-			rvalue_reference_to_pointer ///< Rvalue reference to a pointer.
-		};
-
-		/// Default constructor.
-		qualified_type() = default;
-		/// Initializes this struct with the given \p clang::QualType.
-		explicit qualified_type(clang::QualType qty) : type(qty.getCanonicalType()) {
-			std::vector<type_property> props;
-			base_type = entity::strip_type(type, &props);
-			postfix = entity::get_type_postfix(props);
-			// calculate kind
-			const clang::Type *ty = type.getTypePtr();
-			if (ty->isRValueReferenceType()) {
-				const clang::Type *pty = ty->getPointeeType().getTypePtr();
-				if (pty->isPointerType() || pty->isArrayType()) {
-					kind = reference_kind::rvalue_reference_to_pointer;
-				} else {
-					kind = reference_kind::rvalue_reference_to_object;
-				}
-			} else if (ty->isLValueReferenceType()) {
-				kind = reference_kind::lvalue_reference;
-			} else if (ty->isPointerType() || ty->isArrayType()) {
-				kind = reference_kind::pointer;
-			} else {
-				kind = reference_kind::value;
-			}
-		}
-
-		/// Tries to find the \ref user_type_entity that corresponds to this type.
-		void find_entity(const entity_registry &reg) {
-			if (base_type->isEnumeralType() || base_type->isRecordType()) {
-				entity = cast<user_type_entity>(reg.find_entity(base_type->getAsTagDecl()));
-			}
-		}
-
-		std::string postfix; ///< Stores the postfix for this type.
-		clang::QualType type; ///< The type.
-		user_type_entity *entity = nullptr; ///< The entity associated with this type.
-		const clang::Type *base_type = nullptr; ///< The type of \ref entity.
-		reference_kind kind = reference_kind::invalid; ///< The kind of this type.
-
-		/// Returns the name of the underlying type. For enum types, this returns the corresponding integral type since
-		/// enums cannot have custom corresponding integral types in C.
-		std::string get_exported_underlying_type_name() const {
-			const clang::Type *basety = base_type;
-			if (auto *recdecl = dyn_cast<record_entity>(entity); recdecl) {
-				return entity->name.compose();
-			}
-			if (auto *enumdecl = dyn_cast<enum_entity>(entity); enumdecl) {
-				basety = enumdecl->get_integral_type();
-			}
-			clang::PrintingPolicy policy{clang::LangOptions()};
-			policy.Bool = 1;
-			return clang::QualType(basety, 0).getAsString(policy);
-		}
-		/// Returns the spelling of the underlying type used in host code.
-		std::string get_internal_type_name() const {
-			return clang::QualType(base_type, 0).getAsString(get_internal_type_printing_policy());
-		}
-		/// Returns the spelling of this type used in host code.
-		std::string get_internal_type_spelling() const {
-			return type.getAsString(get_internal_type_printing_policy());
-		}
-
-		/// Returns the full signature of this type used for parameters and return values.
-		std::string get_temporary_spelling() const {
-			switch (kind) {
-			case reference_kind::value:
-				if (auto *rec_ent = dyn_cast<record_entity>(entity); rec_ent) {
-					return rec_ent->move_struct_name.compose() + postfix; // use move struct for records
-				}
-				[[fallthrough]]; // for enums and primitive types
-			case reference_kind::pointer:
-				return get_exported_underlying_type_name() + postfix; // use type directly
-			case reference_kind::rvalue_reference_to_object:
-				if (auto *rec_ent = dyn_cast<record_entity>(entity); rec_ent) { // the move flag must be true
-					return rec_ent->move_struct_name.compose() + postfix;
-				}
-				[[fallthrough]]; // for enums and primitive types
-			case reference_kind::rvalue_reference_to_pointer:
-				[[fallthrough]];
-			case reference_kind::lvalue_reference:
-				return get_exported_underlying_type_name() + postfix + "* const"; // use pointer
-			case reference_kind::invalid:
-				return "@INVALID";
-			}
-		}
-		/// Returns the full signature of this type used for field getter return types.
-		std::string get_field_rettype_spelling() const {
-			switch (kind) {
-			case reference_kind::value:
-				[[fallthrough]];
-			case reference_kind::pointer:
-				return get_exported_underlying_type_name() + postfix + "*";
-			case reference_kind::rvalue_reference_to_object:
-				[[fallthrough]];
-			case reference_kind::rvalue_reference_to_pointer:
-				[[fallthrough]];
-			case reference_kind::lvalue_reference:
-				return get_exported_underlying_type_name() + postfix + "* const";
-			case reference_kind::invalid:
-				return "@INVALID";
-			}
-		}
-
-		/// Prints to the given stream a short clip of code that converts a parameter from an API type to a internal
-		/// type that can be passed to a internal function.
-		void export_convert_to_internal(
-			export_writer &out, std::string_view paramname, std::string_view tmpname
-		) const {
-			if (auto *rec_ent = dyn_cast<record_entity>(entity); rec_ent) {
-				if (kind == reference_kind::value || kind == reference_kind::rvalue_reference_to_object) {
-					out.start_line() << "assert(" << paramname << ".object != NULL);\n";
-					if (kind == reference_kind::rvalue_reference_to_object) {
-						out.start_line() << "assert(" << paramname << ".move);\n";
-					}
-				}
-			}
-		}
-		/// Prints to the given stream a short clip of code used to pass an argument to an internal function.
-		void export_pass_arg(export_writer &out, std::string_view paramname, std::string_view tmpname) const {
-			using namespace fmt::literals;
-
-			// TODO type aliasing?
-			std::string_view fmtstr;
-			switch (kind) {
-			case reference_kind::value:
-				{
-					if (auto *rec_ent = dyn_cast<record_entity>(entity); rec_ent) {
-						fmtstr =
-							"("
-								"{param}.move ? "
-								"{typename}(std::move(*reinterpret_cast<{typename}*>({param}.object))) : "
-								"{typename}(*reinterpret_cast<const {typename}*>({param}.object))"
-							")";
-					} else if (auto *enum_ent = dyn_cast<enum_entity>(entity); enum_ent) {
-						fmtstr = "static_cast<{typename}>({param})";
-					} else {
-						fmtstr = "{param}";
-					}
-				}
-				break;
-			case reference_kind::rvalue_reference_to_object:
-				{
-					if (auto *rec_ent = dyn_cast<record_entity>(entity); rec_ent) {
-						fmtstr = "std::move(*reinterpret_cast<{typename}*>({param}.object))";
-					} else if (auto *enum_ent = dyn_cast<enum_entity>(entity); enum_ent) {
-						fmtstr = "std::move(static_cast<{typename}*>({param}))";
-					} else {
-						fmtstr = "std::move({param})";
-					}
-				}
-				break;
-			case reference_kind::pointer:
-				fmtstr = "reinterpret_cast<{typespelling}>({param})";
-				break;
-			case reference_kind::lvalue_reference:
-				fmtstr = "reinterpret_cast<{typespelling}>(*{param})";
-				break;
-			case reference_kind::rvalue_reference_to_pointer:
-				fmtstr = "std::move(reinterpret_cast<std::remove_reference_t<{typespelling}>*>({param}))";
-				break;
-			case reference_kind::invalid:
-				fmtstr = "@INVALID";
-				break;
-			}
-			out.start_line() <<
-				fmt::format(
-					std::string(fmtstr), // TODO why?
-					"param"_a = paramname,
-					"tmp"_a = tmpname,
-					"typename"_a = get_internal_type_name(),
-					"typespelling"_a = get_internal_type_spelling()
-				);
-		}
-		/// Exports the code before the function call, mainly for declaring temprary variables for returning or
-		/// returning directly.
-		void export_before_function_call(export_writer &out, std::string_view tmpname) const {
-			out.start_line();
-			if (type->isVoidType()) {
-				return;
-			}
-			std::string tyname = get_exported_underlying_type_name();
-			// TODO Designated initializers for C++20
-			switch (kind) {
-			case reference_kind::value:
-				{
-					if (auto *rec_ent = dyn_cast<record_entity>(entity); rec_ent) {
-						// TODO stupid implementation
-						out << "auto *" << tmpname << " = new " << rec_ent->get_internal_type_name() << "(";
-					} else if (isa<enum_entity>(entity)) {
-						out << "return static_cast<" << tyname << postfix << ">(";
-					} else {
-						out << "return ";
-					}
-				}
-				break;
-			case reference_kind::rvalue_reference_to_object:
-				{
-					if (auto *rec_ent = dyn_cast<record_entity>(entity); rec_ent) {
-						out << "return " << rec_ent->move_struct_name.compose() << "{";
-					} else if (isa<enum_entity>(entity)) {
-						out << "return reinterpret_cast<" << tyname << postfix << ">(&(";
-					} else {
-						out << "return &(";
-					}
-				}
-				break;
-			case reference_kind::pointer:
-				out << "return reinterpret_cast<" << tyname << postfix << ">(";
-				break;
-			case reference_kind::rvalue_reference_to_pointer:
-				[[fallthrough]];
-			case reference_kind::lvalue_reference:
-				out << "return reinterpret_cast<" << tyname << postfix << "*>(&(";
-				break;
-			case reference_kind::invalid:
-				out << "@INVALID";
-				break;
-			}
-		}
-		/// Exports the code after the function call, mainly for returning.
-		void export_after_function_call(export_writer &out, std::string_view tmpname) const {
-			if (type->isVoidType()) {
-				out << ";\n";
-				return;
-			}
-			switch (kind) {
-			case reference_kind::value:
-				{
-					if (auto *rec_ent = dyn_cast<record_entity>(entity); rec_ent) {
-						out << ");\n";
-						out.start_line() <<
-							"return " << rec_ent->move_struct_name.compose() << "{reinterpret_cast<" <<
-							get_exported_underlying_type_name() << "*>(" << tmpname << "), false};\n";
-					} else if (isa<enum_entity>(entity)) {
-						out << ");\n";
-					} else {
-						out << ";\n";
-					}
-				}
-				break;
-			case reference_kind::rvalue_reference_to_object:
-				{
-					if (isa<record_entity>(entity)) {
-						out << ", true};\n";
-					} else if (isa<enum_entity>(entity)) {
-						out << "));\n";
-					} else {
-						out << ");\n";
-					}
-				}
-				break;
-			case reference_kind::pointer:
-				out << ");\n";
-				break;
-			case reference_kind::rvalue_reference_to_pointer:
-				[[fallthrough]];
-			case reference_kind::lvalue_reference:
-				out << "));\n";
-				break;
-			case reference_kind::invalid:
-				out << "@INVALID";
-				break;
-			}
-		}
-
-		/// Creates a \ref qualified_type for the given \p clang::QualType and calls
-		/// \ref entity_registry::queue_dependent_type() to queue the associated entity if necessary.
-		///
-		/// \return The \ref qualified_type created from the \p clang::QualType.
-		inline static qualified_type queue_as_dependency(export_propagation_queue &q, clang::QualType qty) {
-			qualified_type res(qty);
-			res.entity = q.queue_dependent_type(res.base_type);
-			return res;
 		}
 	};
 
@@ -562,8 +294,8 @@ namespace apigen {
 		void cache_export_names(entity_registry &reg, const naming_conventions &conv) override {
 			std::string
 				envname = get_environment_name(llvm::cast<clang::Decl>(declaration->getDeclContext()), reg, conv),
-				clsname = parent->get_declaration_name(),
-				myname = get_declaration_name();
+				clsname = parent->get_exported_name(),
+				myname = get_exported_name();
 			host_getter_name = reg.global_scope.register_name(fmt::format(
 				conv.host_field_getter_name_pattern, envname, clsname, myname
 			));
@@ -620,6 +352,9 @@ namespace apigen {
 		explicit function_entity(clang::NamedDecl *decl) : entity(decl) {
 		}
 
+		/// Returns the name used for the given operator.
+		static std::string_view get_operator_name(clang::OverloadedOperatorKind);
+
 		/// Queues argument types and the return type for exporting.
 		void propagate_export(export_propagation_queue &q, entity_registry &reg) override {
 			auto *func = llvm::cast<clang::FunctionDecl>(declaration);
@@ -636,7 +371,7 @@ namespace apigen {
 		void cache_export_names(entity_registry &reg, const naming_conventions &conv) override {
 			std::string
 				envname = get_environment_name(declaration, reg, conv),
-				myname = get_declaration_name();
+				myname = get_exported_name();
 			host_name = reg.global_scope.register_name(fmt::format(conv.host_function_name_pattern, envname, myname));
 			api_name = reg.api_struct_scope.register_name(fmt::format(
 				conv.api_function_name_pattern, envname, myname
@@ -697,14 +432,40 @@ namespace apigen {
 		void cache_export_names(entity_registry &reg, const naming_conventions &conv) override {
 			std::string
 				envname = get_environment_name(llvm::cast<clang::Decl>(declaration->getDeclContext()), reg, conv),
-				clsname = parent->get_declaration_name(),
-				myname = get_declaration_name();
-			host_name = reg.global_scope.register_name(fmt::format(
-				conv.host_method_name_pattern, envname, clsname, myname
-			));
-			api_name = reg.api_struct_scope.register_name(fmt::format(
-				conv.api_method_name_pattern, envname, clsname, myname
-			));
+				clsname = parent->get_exported_name();
+			if (declaration->getDeclName().isIdentifier()) {
+				std::string myname = get_exported_name();
+				host_name = reg.global_scope.register_name(fmt::format(
+					conv.host_method_name_pattern, envname, clsname, myname
+				));
+				api_name = reg.api_struct_scope.register_name(fmt::format(
+					conv.api_method_name_pattern, envname, clsname, myname
+				));
+			} else {
+				clang::DeclarationName name = declaration->getDeclName();
+				std::string myname;
+				switch (name.getNameKind()) {
+				case clang::DeclarationName::NameKind::CXXOperatorName:
+					myname = get_operator_name(name.getCXXOverloadedOperator());
+					break;
+				case clang::DeclarationName::NameKind::CXXConversionFunctionName:
+					{
+						std::vector<type_property> props;
+						const clang::Type *ty = strip_type(name.getCXXNameType(), &props);
+						myname = get_type_traits_identifier(props) + reg.get_exported_name(ty);
+					}
+					break;
+				default:
+					myname = "UNHANDLED_METHOD_TYPE";
+					break;
+				}
+				host_name = reg.global_scope.register_name(fmt::format(
+					conv.host_member_operator_name_pattern, envname, clsname, myname
+				));
+				api_name = reg.api_struct_scope.register_name(fmt::format(
+					conv.api_member_operator_name_pattern, envname, clsname, myname
+				));
+			}
 		}
 
 		/// Exports the function pointer. Uses different patterns depending on whether the method is static.
@@ -715,5 +476,16 @@ namespace apigen {
 		void export_host_api_initializers(const entity_registry&, export_writer&, std::string_view) const override;
 
 		record_entity *parent = nullptr; ///< The record of this entity.
+	};
+
+	/// An entity that represents a constructor.
+	class constructor_entity : public method_entity {
+	public:
+		/// Used by RAII helpers.
+		constexpr static entity_kind kind = entity_kind::constructor;
+		/// Returns \ref entity_kind::constructor.
+		entity_kind get_kind() const override {
+			return entity_kind::constructor;
+		}
 	};
 }

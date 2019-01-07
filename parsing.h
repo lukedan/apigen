@@ -37,6 +37,11 @@ namespace apigen {
 			_check_register_decl<method_entity>(d);
 			return _base::TraverseCXXMethodDecl(d);
 		}
+		/// Handles constructors.
+		bool TraverseCXXConstructorDecl(clang::CXXConstructorDecl *d) {
+			//_check_register_decl<method_entity>(d); // TODO constructor_entity
+			return _base::TraverseCXXConstructorDecl(d);
+		}
 		/// Handles field declarations.
 		bool TraverseFieldDecl(clang::FieldDecl *d) {
 			_check_register_decl<field_entity>(d);
@@ -51,6 +56,21 @@ namespace apigen {
 		bool TraverseEnumDecl(clang::EnumDecl *d) {
 			_check_register_decl<enum_entity>(d);
 			return _base::TraverseEnumDecl(d);
+		}
+
+		/// Handles replacement information in type alias declarations.
+		bool TraverseTypeAliasDecl(clang::TypeAliasDecl *d) {
+			if (d) {
+				registry.register_type_alias_decl(d);
+			}
+			return _base::TraverseTypeAliasDecl(d);
+		}
+		/// Handles replacement information in \p typedef declarations.
+		bool TraverseTypedefDecl(clang::TypedefDecl *d) {
+			if (d) {
+				registry.register_type_alias_decl(d);
+			}
+			return _base::TraverseTypedefDecl(d);
 		}
 
 		entity_registry &registry; ///< The associated \ref entity_registry.

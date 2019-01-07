@@ -13,6 +13,7 @@
 
 namespace apigen {
 	class user_type_entity;
+	class template_specialization_entity;
 
 	/// Used to prevent duplicate names in the same scope.
 	class name_scope {
@@ -87,6 +88,49 @@ namespace apigen {
 		registry _reg; ///< The registry.
 		const name_scope *const _parent = nullptr; ///< The parent scope.
 	};
+	/// Dictates how objects in the generated code are named.
+	///
+	/// \todo Document each field.
+	struct naming_conventions {
+		std::string
+			host_function_name_pattern,
+			api_function_name_pattern,
+
+			api_enum_name_pattern,
+			api_enum_entry_name_pattern,
+
+			api_record_name_pattern,
+			api_move_struct_name_pattern, ///< Name pattern of move wrapper for structs.
+			api_templated_record_name_pattern,
+			api_templated_record_move_struct_name_pattern, ///< Name pattern of move wrapper for templated structs.
+
+			host_method_name_pattern,
+			api_method_name_pattern,
+
+			/// Name pattern of non-static member operators (including normal operators and conversions) in host code.
+			host_member_operator_name_pattern,
+			/// Name pattern of non-static member operators (including normal operators and conversions) in API code.
+			api_member_operator_name_pattern,
+
+			host_field_getter_name_pattern,
+			api_field_getter_name_pattern,
+
+			env_separator,
+
+			api_struct_name, ///< Name of the API struct.
+			/// The name of the class containing all API function implementations. This is mainly to make friend
+			/// declarations more convenient.
+			host_function_class_name,
+			host_init_api_function_name; ///< The name of the function used to initialize the API struct.
+
+		int
+			/// The number of namespaces levels, starting from top-level namespaces, that are prepended to the
+			/// environment name. If this is less than zero, then all namespace names will be added.
+			namespace_levels = -1,
+			/// The number of parent classes, starting from top-level classes, that are prepended to theenvironment
+			/// name. If this is less than zero, then all class names will be added.
+			parent_class_levels = -1;
+	};
 	/// Registry of all entities and names.
 	class entity_registry {
 	public:
@@ -104,7 +148,14 @@ namespace apigen {
 		/// Registers a template specialization. If it's not previously registered an a
 		/// \ref template_specialization_entity is created, then
 		/// \ref template_specialization_entity::copy_export_options() will be called.
-		bool register_template_specialization_entity(clang::ClassTemplateSpecializationDecl*);
+		template_specialization_entity *register_template_specialization_entity(
+			clang::ClassTemplateSpecializationDecl*
+		);
+		/// Extracts annotations from the given type alias. This is mainly used for template specializations since
+		/// there's no direct way to add annotations to them individually.
+		///
+		/// \todo For whatever reason \p using doesn't work with annotations.
+		void register_type_alias_decl(clang::TypedefNameDecl*);
 
 		/// Performs preparations before exporting by calling \ref entity::propagate_export(),
 		/// \ref entity::gather_extra_dependencies(), and \ref entity::cache_export_names().
@@ -116,29 +167,29 @@ namespace apigen {
 			for (const entity *ent : exported_entities) {
 				ent->export_api_types(*this, out);
 			}
-			out.start_line() << "typedef struct " << scopes::braces;
+			out << "typedef struct " << scopes::braces << new_line();
 			for (const entity *ent : exported_entities) {
 				ent->export_api_struct_func_ptrs(*this, out);
 			}
-			out.end_indented_scope() << " " << conv.api_struct_name << ";\n";
+			out.end_scope() << " " << conv.api_struct_name << ";" << new_line();
 		}
 		/// Calls \ref entity::export_host_functions() to export all host functions.
 		void export_host_source(export_writer &out, const naming_conventions &conv) const {
 			std::string_view api_obj_name = "api";
 
-			out.start_line() << "class " << APIGEN_STR(APIGEN_API_CLASS_NAME) << " " << scopes::class_def;
-			out.start_line(1) << "public:\n";
+			out << "class " << APIGEN_STR(APIGEN_API_CLASS_NAME) << " " << scopes::class_def << new_line(1);
+			out << "public:" << new_line();
 			for (const entity *ent : exported_entities) {
 				ent->export_host_functions(*this, out);
 			}
-			out.end_indented_scope() << "\n\n";
-			out.start_line() <<
+			out.end_scope() << new_line() << new_line();
+			out <<
 				"void " << conv.host_init_api_function_name << "(" << conv.api_struct_name << " &" <<
-				api_obj_name << ") " << scopes::braces;
+				api_obj_name << ") " << scopes::braces << new_line();
 			for (const entity *ent : exported_entities) {
 				ent->export_host_api_initializers(*this, out, api_obj_name);
 			}
-			out.end_indented_scope() << "\n";
+			out.end_scope() << new_line();
 		}
 
 		/// Finds the \ref entity that corresponds to the given declaration. Returns \p nullptr if none is found.
@@ -147,8 +198,26 @@ namespace apigen {
 			return it == entities.end() ? nullptr : it->second.get();
 		}
 
+		/// If the given type is a built-in type, returns its name; otherwise returns the name of the corresponding
+		/// \ref entity which may be a substitute name.
+		std::string get_exported_name(const clang::Type *ty) const {
+			if (ty->isRecordType() || ty->isEnumeralType()) {
+				return get_exported_name(ty->getAsTagDecl());
+			}
+			return clang::QualType(ty, 0).getAsString(get_cpp_printing_policy());
+		}
+		/// \overload
+		std::string get_exported_name(clang::TagDecl *decl) const {
+			if (auto *ent = find_entity(decl); ent) {
+				return ent->get_exported_name();
+			}
+			return decl->getName().str(); // shouldn't happen, except maybe for templates
+		}
+
 		std::unordered_map<clang::NamedDecl*, std::unique_ptr<entity>> entities; ///< The list of entities.
 		std::unordered_set<entity*> exported_entities; ///< The list of entities that are exported.
+		///< The list of \p typedef and \p using derivatives that are processed after parsing has completed.
+		std::vector<clang::TypedefNameDecl*> deferred_typedefs;
 		name_scope
 			global_scope, ///< The global scope.
 			api_struct_scope{&global_scope}, ///< The scope of the API struct containing function pointers.

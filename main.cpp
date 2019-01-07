@@ -45,7 +45,7 @@ int main(int argc, char **argv) {
 
 	naming_conventions conv;
 	conv.host_function_name_pattern = "_api_wrapper_{0}_{1}";
-	conv.api_function_name_pattern = "{0}_{1}_{2}";
+	conv.api_function_name_pattern = "{0}_{1}";
 
 	conv.api_enum_name_pattern = "{0}_{1}";
 	conv.api_enum_entry_name_pattern = "{0}_{1}_{2}";
@@ -57,6 +57,9 @@ int main(int argc, char **argv) {
 
 	conv.host_method_name_pattern = "_api_wrapper_{0}_{1}_{2}";
 	conv.api_method_name_pattern = "{0}_{1}_{2}";
+
+	conv.host_member_operator_name_pattern = "{0}_{1}_op_{2}";
+	conv.api_member_operator_name_pattern = "{0}_{1}_operator_{2}";
 
 	conv.host_field_getter_name_pattern = "_api_wrapper_{0}_{1}_{2}_getter";
 	conv.api_field_getter_name_pattern = "{0}_{1}_get_{2}";
@@ -82,7 +85,8 @@ int main(int argc, char **argv) {
 	std::cout << "\n\n";
 	std::cout << "exported entities:\n";
 	for (entity *ent : reg.exported_entities) {
-		std::cout << ent->declaration->getDeclKindName() << ", " << ent->declaration->getName().str() << "\n";
+		std::cout <<
+			ent->declaration->getDeclKindName() << ", " << ent->declaration->getName().str() << " as " << ent->substitute_name << "\n";
 	}
 
 	return 0;
