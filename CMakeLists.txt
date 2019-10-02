@@ -3,20 +3,18 @@ project(apigen)
 
 
 # LLVM and clang related stuff
-set(LLVM_CONFIG llvm-config)
+if (NOT DEFINED LLVM_CONFIG)
+	set(LLVM_CONFIG llvm-config)
+endif()
 
-execute_process(COMMAND ${LLVM_CONFIG} --src-root OUTPUT_VARIABLE LLVM_SRC_DIRECTORY OUTPUT_STRIP_TRAILING_WHITESPACE)
+execute_process(COMMAND ${LLVM_CONFIG} --includedir OUTPUT_VARIABLE LLVM_INCLUDE_DIR OUTPUT_STRIP_TRAILING_WHITESPACE)
 execute_process(COMMAND ${LLVM_CONFIG} --obj-root OUTPUT_VARIABLE LLVM_OBJ_DIRECTORY OUTPUT_STRIP_TRAILING_WHITESPACE)
 execute_process(COMMAND ${LLVM_CONFIG} --cxxflags OUTPUT_VARIABLE LLVM_CXX_FLAGS OUTPUT_STRIP_TRAILING_WHITESPACE)
-separate_arguments(LLVM_CXX_FLAGS)
 execute_process(COMMAND ${LLVM_CONFIG} --ldflags OUTPUT_VARIABLE LLVM_LD_FLAGS OUTPUT_STRIP_TRAILING_WHITESPACE)
-separate_arguments(LLVM_LD_FLAGS)
 execute_process(COMMAND ${LLVM_CONFIG} --libs OUTPUT_VARIABLE LLVM_LIBS OUTPUT_STRIP_TRAILING_WHITESPACE)
 separate_arguments(LLVM_LIBS)
 execute_process(COMMAND ${LLVM_CONFIG} --system-libs OUTPUT_VARIABLE LLVM_SYSTEM_LIBS OUTPUT_STRIP_TRAILING_WHITESPACE)
 separate_arguments(LLVM_SYSTEM_LIBS)
-
-set(CLANG_INCLUDE_DIRECTORIES ${LLVM_SRC_DIRECTORY}/tools/clang/include ${LLVM_OBJ_DIRECTORY}/tools/clang/include)
 
 set(CLANG_LIBRARIES
 	clangFrontendTool
@@ -51,21 +49,29 @@ target_sources(apigen
 	PUBLIC
 		apigen_definitions.h
 	PRIVATE
-		entity.cpp
-		entity.h
-		entity_registry.cpp
-		entity_registry.h
-		entity_types.cpp
-		entity_types.h
-		enum_bitwise.h
-		export_writer.h
-		parsing.h
-		qualified_type.cpp
-		qualified_type.h
-		main.cpp)
+		src/entity_kinds/constructor_entity.h
+		src/entity_kinds/enum_entity.h
+		src/entity_kinds/field_entity.h
+		src/entity_kinds/function_entity.h
+		src/entity_kinds/method_entity.h
+		src/entity_kinds/record_entity.cpp
+		src/entity_kinds/record_entity.h
+		src/entity_kinds/user_type_entity.h
+		src/dependency_analyzer.cpp
+		src/dependency_analyzer.h
+		src/entity.cpp
+		src/entity.h
+		src/entity_registry.h
+		src/exporter.h
+		src/main.cpp
+		src/misc.h
+		src/naming_convention.h
+		src/parser.h
+		src/types.cpp
+		src/types.h)
 target_include_directories(apigen
 	PRIVATE
-		${CLANG_INCLUDE_DIRECTORIES})
+		${LLVM_INCLUDE_DIR})
 target_compile_options(apigen
 	PRIVATE
 		${LLVM_CXX_FLAGS})
