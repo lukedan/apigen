@@ -19,7 +19,7 @@ namespace apigen::entities {
 		}
 
 		/// Initializes \ref _decl.
-		explicit record_entity(clang::CXXRecordDecl *decl) : user_type_entity(decl) {
+		explicit record_entity(clang::CXXRecordDecl *decl) : user_type_entity(), _decl(decl) {
 		}
 
 		/// Gathers all dependencies for this record type.
@@ -34,15 +34,16 @@ namespace apigen::entities {
 			return entity::handle_attribute(anno);
 		}
 
-		/// This entity should be trimmed if it's a local class, if it has no definition, or if it is in a templated
-		/// context.
-		[[nodiscard]] bool should_trim() const override {
-			if (auto *def = llvm::cast<clang::CXXRecordDecl>(_decl->getDefinition())) {
-				return def->isLocalClass() || def->isDependentContext();
-			}
-			return true; // no definition, trim
+		/// Returns the declaration of this entity.
+		[[nodiscard]] clang::CXXRecordDecl *get_declaration() const {
+			return _decl;
+		}
+		/// Returns \ref _decl.
+		[[nodiscard]] clang::NamedDecl *get_generic_declaration() const override {
+			return _decl;
 		}
 	protected:
+		clang::CXXRecordDecl *_decl = nullptr; ///< The declaration of this entity.
 		bool _recursive = false; ///< Indicates whether members of this record should be exported.
 	};
 }

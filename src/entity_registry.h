@@ -16,6 +16,7 @@
 #include "dependency_analyzer.h"
 #include "entity.h"
 #include "entity_kinds/constructor_entity.h"
+#include "entity_kinds/enum_entity.h"
 #include "entity_kinds/field_entity.h"
 #include "entity_kinds/function_entity.h"
 #include "entity_kinds/method_entity.h"
@@ -25,58 +26,36 @@ namespace apigen {
 	/// A class that collects information about entities and analyzes their dependencies.
 	class entity_registry {
 	public:
-		/// Registers the given clang declaration.
-		template <typename Decl> entity *register_declaration(Decl *current_decl) {
-			if (auto [found, created] = _find_or_create_entity_static(current_decl); found != _decl_mapping.end()) {
+		/// Registers the given clang declaration, during the parsing process.
+		template <typename Decl> entity *register_parsing_declaration(Decl *current_decl) {
+			auto [found, created] = _find_or_create_parsing_entity_static(current_decl);
+			if (found != _decl_mapping.end()) {
 				found->second->handle_declaration(current_decl);
 				return found->second.get();
 			}
 			return nullptr;
 		}
-		/// Registers the given clang declaration, after parsing has finished. If the new entity is marked for
-		/// exporting, this function also tries to queue this entity. This is used mostly for template specialization
-		/// entities and their children.
-		entity *register_parsed_declaration(clang::NamedDecl *decl) {
-			auto [found, created] = _find_or_create_entity_dynamic(decl);
-			if (found != _decl_mapping.end() && created) {
-				for (auto *redecl : decl->redecls()) {
-					found->second->handle_declaration(llvm::cast<clang::NamedDecl>(redecl));
-				}
-				if (!found->second->should_trim()) {
-					if (analyzer && found->second->is_marked_for_exporting()) {
-						analyzer->try_queue(*found->second);
-					}
-					return found->second.get();
-				}
-				_decl_mapping.erase(found);
-			}
-			return nullptr;
-		}
 
-		/// Trims entities that cannot be exported.
-		void trim_entities() {
-			for (auto it = _decl_mapping.begin(); it != _decl_mapping.end(); ) {
-				if (it->second->should_trim()) {
-					it = _decl_mapping.erase(it);
-				} else {
-					++it;
-				}
-			}
-		}
-
-		/// Returns the entity that correspond to the given \p clang::NamedDecl.
-		entity *find_entity(clang::NamedDecl *decl) {
+		/// Returns the entity that correspond to the given \p clang::NamedDecl. This function should only be called to
+		/// find an entity that some other exported entity depends on. A new entity is registered and queued if
+		/// necessary if a corresponding entity is not found.
+		entity *find_or_register_parsed_entity(clang::NamedDecl *decl) {
 			decl = llvm::cast<clang::NamedDecl>(decl->getCanonicalDecl());
 			auto it = _decl_mapping.lower_bound(decl);
 			if (it != _decl_mapping.end() && it->first == decl) {
 				return it->second.get();
 			}
-			// if this is a class template specialization declaration, then register this entity
-			if (auto *template_decl = llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(decl)) {
-				// must not be a partial specialization to be able to export
-				if (!llvm::isa<clang::ClassTemplatePartialSpecializationDecl>(template_decl)) {
-					return _register_template_specialization_declaration(template_decl, it);
+			// not found, register this entity
+			auto [iter, created] = _find_or_create_entity_dynamic(decl);
+			if (iter != _decl_mapping.end()) {
+				assert_true(created);
+				for (auto *redecl : decl->redecls()) {
+					iter->second->handle_declaration(llvm::cast<clang::NamedDecl>(redecl));
 				}
+				if (analyzer && iter->second->is_marked_for_exporting()) {
+					analyzer->queue(*iter->second);
+				}
+				return iter->second.get();
 			}
 			return nullptr;
 		}
@@ -95,11 +74,25 @@ namespace apigen {
 		_decl_mapping_t _decl_mapping;
 
 		/// Tries to find the \ref entity that correspond to the given declaration, and if one is not found, creates
-		/// a entity associated with it.
-		template <typename Decl> std::pair<_decl_mapping_t::iterator, bool> _find_or_create_entity_static(
+		/// a entity associated with it. This function should only be used when first parsing the source code.
+		template <typename Decl> std::pair<_decl_mapping_t::iterator, bool> _find_or_create_parsing_entity_static(
 			Decl *non_canon_decl
 		) {
 			Decl *decl = llvm::cast<Decl>(non_canon_decl->getCanonicalDecl());
+			bool bad = false;
+			// check if this is a dependent decl
+			if constexpr (std::is_base_of_v<clang::DeclContext, Decl>) { // covers functions, records, and enums
+				bad = bad || decl->isDependentContext();
+			} else if constexpr (std::is_same_v<clang::FieldDecl, Decl>) { // fields
+				bad = bad || decl->getParent()->isDependentContext();
+			}
+			if constexpr (std::is_same_v<clang::CXXRecordDecl, Decl>) { // check if this is a local class
+				bad = bad || decl->isLocalClass();
+			}
+			if (bad) { // don't handle this decl
+				return {_decl_mapping.end(), false};
+			}
+
 			auto found = _decl_mapping.lower_bound(decl);
 			if (found == _decl_mapping.end() || found->first != decl) { // not found
 				std::unique_ptr<entity> new_entity;
@@ -113,6 +106,8 @@ namespace apigen {
 					new_entity = std::make_unique<entities::record_entity>(decl);
 				} else if constexpr (std::is_same_v<Decl, clang::FieldDecl>) {
 					new_entity = std::make_unique<entities::field_entity>(decl);
+				} else if constexpr (std::is_same_v<Decl, clang::EnumDecl>) {
+					new_entity = std::make_unique<entities::enum_entity>(decl);
 				}
 				if (new_entity) {
 					return {_decl_mapping.emplace_hint(found, decl, std::move(new_entity)), true};
@@ -122,6 +117,7 @@ namespace apigen {
 			}
 			return {found, false};
 		}
+		/// Dynamic version of \ref _find_or_create_entity_static().
 		std::pair<_decl_mapping_t::iterator, bool> _find_or_create_entity_dynamic(clang::NamedDecl *non_canon_decl) {
 			auto *decl = llvm::cast<clang::NamedDecl>(non_canon_decl->getCanonicalDecl());
 			auto found = _decl_mapping.lower_bound(decl);
@@ -141,6 +137,8 @@ namespace apigen {
 					new_entity = std::make_unique<entities::record_entity>(record_decl);
 				} else if (auto *field_decl = llvm::dyn_cast<clang::FieldDecl>(decl)) {
 					new_entity = std::make_unique<entities::field_entity>(field_decl);
+				} else if (auto *enum_decl = llvm::dyn_cast<clang::EnumDecl>(decl)) {
+					new_entity = std::make_unique<entities::enum_entity>(enum_decl);
 				}
 				if (new_entity) {
 					return {_decl_mapping.emplace_hint(found, decl, std::move(new_entity)), true};
@@ -149,43 +147,6 @@ namespace apigen {
 				}
 			}
 			return {found, false};
-		}
-
-		/// Recursively registers all children declarations of the given \p clang::CXXRecordDecl by calling
-		/// \ref register_parsed_declarationi.
-		void _register_parsed_children_decls(clang::CXXRecordDecl *decl) {
-			std::stack<clang::CXXRecordDecl*> stk;
-			stk.emplace(decl);
-			while (!stk.empty()) {
-				clang::CXXRecordDecl *current = stk.top();
-				stk.pop();
-				for (auto *child_decl : current->decls()) {
-					if (auto *named_decl = llvm::dyn_cast<clang::NamedDecl>(child_decl)) {
-						if (entity *ent = register_parsed_declaration(named_decl)) {
-							if (auto *child_record = llvm::dyn_cast<clang::CXXRecordDecl>(named_decl)) {
-								stk.emplace(child_record);
-							}
-						}
-					}
-				}
-			}
-		}
-		/// Registers a template specialization declaration after parsing has finished. This function assumes that the
-		/// given declaration is the canonical declaration, and does not check if the entity exists.
-		entities::record_entity *_register_template_specialization_declaration(
-			clang::ClassTemplateSpecializationDecl *decl, _decl_mapping_t::iterator hint
-		) {
-			auto entity = std::make_unique<entities::record_entity>(decl);
-			entities::record_entity *res = entity.get();
-			auto it = _decl_mapping.emplace_hint(hint, decl, std::move(entity));
-			for (auto *redecl : decl->redecls()) {
-				it->second->handle_declaration(redecl);
-			}
-			if (analyzer && it->second->is_marked_for_exporting()) {
-				analyzer->queue(*it->second);
-			}
-			_register_parsed_children_decls(decl);
-			return res;
 		}
 	};
 }

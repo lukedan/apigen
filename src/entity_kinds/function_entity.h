@@ -63,15 +63,12 @@ namespace apigen::entities {
 		}
 
 		/// Returns \ref _decl.
-		[[nodiscard]] clang::NamedDecl *get_declaration() const override {
+		[[nodiscard]] clang::FunctionDecl *get_declaration() const {
 			return _decl;
 		}
-		/// This entity should be trimmed if it's in a templated context.
-		[[nodiscard]] bool should_trim() const override {
-			if (clang::FunctionDecl *def = _decl->getDefinition()) {
-				return def->isDependentContext();
-			}
-			return _decl->isDependentContext(); // TODO is this accurate? e.g. friend declarations?
+		/// Returns \ref _decl.
+		[[nodiscard]] clang::NamedDecl *get_generic_declaration() const override {
+			return _decl;
 		}
 	protected:
 		std::optional<qualified_type> _api_return_type; ///< The return type of the API function.

@@ -24,13 +24,17 @@ namespace apigen::entities {
 		explicit method_entity(clang::CXXMethodDecl *decl) : function_entity(decl) {
 		}
 
+		/// Returns whether this method is static.
+		[[nodiscard]] bool is_static() const {
+			return llvm::cast<clang::CXXMethodDecl>(_decl)->isStatic();
+		}
+
 		/// Returns a \ref qualified_type representing the type for \p this.
 		[[nodiscard]] virtual std::optional<qualified_type> get_this_type(entity_registry &reg) const {
-			auto *decl = llvm::cast<clang::CXXMethodDecl>(_decl);
-			if (decl->isStatic()) {
+			if (is_static()) {
 				return std::nullopt;
 			}
-			return qualified_type::from_clang_type(decl->getThisType(), reg);
+			return qualified_type::from_clang_type(llvm::cast<clang::CXXMethodDecl>(_decl)->getThisType(), reg);
 		}
 	protected:
 		/// Prepends a this parameter to the parameter list if necessary.

@@ -42,14 +42,16 @@ namespace apigen {
 	};
 
 	bool is_entity_base_of(entity_kind base, entity_kind derived) {
+		// always keep this list exactly as the same as the entity_kind enum, otherwise the result will be incorrect
 		static entity_base_table<
 			entity,
-			entities::constructor_entity,
+			entities::user_type_entity,
 			entities::enum_entity,
+			entities::record_entity,
 			entities::field_entity,
 			entities::function_entity,
 			entities::method_entity,
-			entities::record_entity
+			entities::constructor_entity
 			/* template_specialization_entity, */
 		> _tbl;
 		return _tbl.is_base_of(base, derived);

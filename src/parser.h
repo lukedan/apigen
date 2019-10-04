@@ -111,7 +111,7 @@ namespace apigen {
 			/// \ref entity_registry::register_declaration().
 			template <typename Decl> void _check_register_decl(Decl *d) {
 				if (d) {
-					_registry.register_declaration(d);
+					_registry.register_parsing_declaration(d);
 				}
 			}
 		};

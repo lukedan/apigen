@@ -16,7 +16,7 @@ namespace apigen::entities {
 		}
 
 		/// Initializes this entity based on the given \p clang::EnumDecl.
-		explicit enum_entity(clang::EnumDecl *decl) : user_type_entity(decl) {
+		explicit enum_entity(clang::EnumDecl *decl) : user_type_entity(), _decl(decl) {
 		}
 
 		/// Returns the type used to store enumerators.
@@ -25,9 +25,20 @@ namespace apigen::entities {
 			return decl->getIntegerType().getCanonicalType().getTypePtr();
 		}
 
-		/// This entity should be trimmed if it has no definition.
-		[[nodiscard]] bool should_trim() const override {
-			return _decl->getDefinition() == nullptr;
+		/// An enum entity has no dependencies.
+		void gather_dependencies(entity_registry&, dependency_analyzer&) override {
+			// nothing to do
 		}
+
+		/// Returns \ref _decl.
+		[[nodiscard]] clang::EnumDecl *get_declaration() const {
+			return _decl;
+		}
+		/// Returns \ref _decl.
+		[[nodiscard]] clang::NamedDecl *get_generic_declaration() const override {
+			return _decl;
+		}
+	protected:
+		clang::EnumDecl *_decl = nullptr; ///< The declaration.
 	};
 }

@@ -51,6 +51,7 @@ target_sources(apigen
 	PRIVATE
 		src/entity_kinds/constructor_entity.h
 		src/entity_kinds/enum_entity.h
+		src/entity_kinds/field_entity.cpp
 		src/entity_kinds/field_entity.h
 		src/entity_kinds/function_entity.h
 		src/entity_kinds/method_entity.h

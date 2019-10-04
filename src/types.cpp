@@ -27,10 +27,9 @@ namespace apigen {
 			}
 		}
 		result.type = canon_type.getTypePtr();
-		if (const clang::Type *tag_type = llvm::dyn_cast<clang::TagType>(result.type)) {
-			if (entity *ent = registry.find_entity(tag_type->getAsTagDecl())) {
-				result.type_entity = dyn_cast<entities::user_type_entity>(ent);
-			}
+		if (auto *tag_type = llvm::dyn_cast<clang::TagType>(result.type)) {
+			entity *ent = registry.find_or_register_parsed_entity(tag_type->getAsTagDecl());
+			result.type_entity = cast<entities::user_type_entity>(ent);
 		}
 		return result;
 	}
@@ -39,7 +38,7 @@ namespace apigen {
 		qualified_type result;
 		result.qualifiers.emplace_back(qualifier::none);
 		result.type_entity = cast<entities::user_type_entity>(
-			reg.find_entity(type->getAsTagDecl()->getCanonicalDecl())
+			reg.find_or_register_parsed_entity(type->getAsTagDecl()->getCanonicalDecl())
 		);
 		result.type = type;
 		return result;

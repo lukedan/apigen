@@ -23,7 +23,7 @@ namespace apigen {
 		}
 		/// Queues the given entity without checking if it has already been marked.
 		void queue(entity &ent) {
-			std::cerr << "exporting: " << ent.get_declaration()->getName().str() << "\n";
+			std::cerr << "exporting: " << to_string_view(ent.get_generic_declaration()->getName()) << "\n";
 			_queue.emplace(&ent);
 		}
 

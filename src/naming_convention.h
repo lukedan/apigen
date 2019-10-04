@@ -91,6 +91,12 @@ namespace apigen {
 			}
 			return "$UNKNOWN_ENTITY_TYPE";
 		}
+
+		std::string
+			/// The name of the struct that holds all API function pointers.
+			api_struct_name,
+			/// The name of the function that initializes a given API struct.
+			api_struct_init_function_name;
 	};
 
 	/// Naming information of overloaded operators.
@@ -201,7 +207,7 @@ namespace apigen {
 		[[nodiscard]] std::string get_function_name(const entities::function_entity &entity) const override {
 			using namespace fmt::literals;
 
-			auto *decl = llvm::cast<clang::FunctionDecl>(entity.get_declaration());
+			auto *decl = entity.get_declaration();
 			return fmt::format(
 				function_name_pattern,
 				"scope"_a = _get_scope_name(decl),
@@ -212,7 +218,7 @@ namespace apigen {
 		[[nodiscard]] std::string get_method_name(const entities::method_entity &entity) const override {
 			using namespace fmt::literals;
 
-			auto *decl = llvm::cast<clang::FunctionDecl>(entity.get_declaration());
+			auto *decl = entity.get_declaration();
 			auto *parent = llvm::cast<clang::CXXRecordDecl>(decl->getParent());
 			return fmt::format(
 				method_name_pattern,
@@ -225,7 +231,7 @@ namespace apigen {
 		[[nodiscard]] std::string get_constructor_name(const entities::constructor_entity &entity) const override {
 			using namespace fmt::literals;
 
-			auto *decl = llvm::cast<clang::DeclContext>(entity.get_declaration());
+			auto *decl = entity.get_declaration();
 			auto *parent = llvm::cast<clang::CXXRecordDecl>(decl->getParent());
 			return fmt::format(
 				constructor_name_pattern,
@@ -238,7 +244,7 @@ namespace apigen {
 		[[nodiscard]] std::string get_user_type_name(const entities::user_type_entity &entity) const override {
 			using namespace fmt::literals;
 
-			auto *decl = llvm::cast<clang::TagDecl>(entity.get_declaration());
+			auto *decl = llvm::cast<clang::TagDecl>(entity.get_generic_declaration());
 			return fmt::format(
 				user_type_name_pattern,
 				"scope"_a = _get_scope_name(decl),
@@ -252,7 +258,7 @@ namespace apigen {
 		) const override {
 			using namespace fmt::literals;
 
-			auto *decl = llvm::cast<clang::CXXRecordDecl>(entity.get_declaration());
+			auto *decl = entity.get_declaration();
 			return fmt::format(
 				destructor_name_pattern,
 				"scope"_a = _get_scope_name(decl),
@@ -266,7 +272,7 @@ namespace apigen {
 		) const override {
 			using namespace fmt::literals;
 
-			auto *decl = llvm::cast<clang::EnumDecl>(entity.get_declaration());
+			auto *decl = entity.get_declaration();
 			return fmt::format(
 				enumerator_name_pattern,
 				"scope"_a = _get_scope_name(decl),
@@ -279,7 +285,7 @@ namespace apigen {
 		[[nodiscard]] std::string get_field_getter_name(const entities::field_entity &entity) const override {
 			using namespace fmt::literals;
 
-			auto *decl = llvm::cast<clang::FieldDecl>(entity.get_declaration());
+			auto *decl = entity.get_declaration();
 			auto *parent = decl->getParent();
 			return fmt::format(
 				field_getter_name_pattern,
@@ -292,7 +298,7 @@ namespace apigen {
 		[[nodiscard]] std::string get_field_const_getter_name(const entities::field_entity &entity) const override {
 			using namespace fmt::literals;
 
-			auto *decl = llvm::cast<clang::FieldDecl>(entity.get_declaration());
+			auto *decl = entity.get_declaration();
 			auto *parent = decl->getParent();
 			return fmt::format(
 				field_const_getter_name_pattern,

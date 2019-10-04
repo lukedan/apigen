@@ -5,6 +5,7 @@
 
 #include <clang/AST/Decl.h>
 
+#include "record_entity.h"
 #include "../entity.h"
 #include "../dependency_analyzer.h"
 #include "../types.h"
@@ -20,27 +21,32 @@ namespace apigen::entities {
 		}
 
 		/// Initializes \ref _decl.
-		explicit field_entity(clang::FieldDecl *decl) : _decl(decl) {
+		explicit field_entity(clang::FieldDecl *decl) : entity(), _decl(decl) {
 		}
 
-		/// Also exports the type of this declaration.
-		void gather_dependencies(entity_registry &reg, dependency_analyzer &queue) override {
-			_type = qualified_type::from_clang_type(_decl->getType(), reg);
-			if (_type.type_entity) {
-				queue.try_queue(*_type.type_entity);
-			}
+		/// Also exports the type of this declaration and the parent type.
+		void gather_dependencies(entity_registry&, dependency_analyzer&) override;
+
+		/// Returns the type of this field.
+		[[nodiscard]] const qualified_type &get_type() const {
+			return _type;
+		}
+		/// Returns the parent type.
+		[[nodiscard]] record_entity *get_parent() const {
+			return _parent;
 		}
 
-		/// Returns the declaration associated with this entity.
-		[[nodiscard]] clang::NamedDecl *get_declaration() const override {
+		/// Returns the declaration of this entity.
+		[[nodiscard]] clang::FieldDecl *get_declaration() const {
 			return _decl;
 		}
-		/// Do not export if this is a field in a templated context.
-		[[nodiscard]] bool should_trim() const override {
-			return _decl->getParent()->isDependentContext();
+		/// Returns the declaration associated with this entity.
+		[[nodiscard]] clang::NamedDecl *get_generic_declaration() const override {
+			return _decl;
 		}
 	protected:
 		qualified_type _type; ///< The type of this field.
+		record_entity *_parent = nullptr; ///< The parent type.
 		clang::FieldDecl *_decl = nullptr; ///< The declaration associated with this entity.
 	};
 }

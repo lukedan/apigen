@@ -21,7 +21,7 @@ namespace apigen {
 		user_type, ///< A user-defined type.
 		enumeration, ///< An enum.
 		record, ///< A struct or class, possibly a template specialization.
-		template_specialization, ///< A template specialization, either explicit or implicit.
+		/*template_specialization, ///< A template specialization, either explicit or implicit.*/
 		field, ///< A field of a record.
 		function, ///< A function, possibly a method.
 		method, ///< A method.
@@ -43,7 +43,7 @@ namespace apigen {
 		virtual ~entity() = default;
 
 		/// Returns the associated \ref clang::NamedDecl.
-		[[nodiscard]] virtual clang::NamedDecl *get_declaration() const = 0;
+		[[nodiscard]] virtual clang::NamedDecl *get_generic_declaration() const = 0;
 
 		/// Marks this entity for exporting.
 		void mark_for_exporting() {
@@ -84,9 +84,6 @@ namespace apigen {
 		}
 		/// Gathers dependencies for this entity.
 		virtual void gather_dependencies(entity_registry&, dependency_analyzer&) = 0;
-
-		/// Called after parsing has finished to decide if this entity should be trimmed.
-		[[nodiscard]] virtual bool should_trim() const = 0;
 	protected:
 		std::string _substitute_name; ///< The alternative name used when exporting this entity.
 		bool _export = false; ///< Whether this entity is exported.
