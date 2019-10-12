@@ -70,16 +70,22 @@ namespace apigen::entities {
 		[[nodiscard]] clang::NamedDecl *get_generic_declaration() const override {
 			return _decl;
 		}
+
+		/// Returns the user-defined name used when exporting.
+		[[nodiscard]] const std::string &get_substitute_name() const {
+			return _export_name;
+		}
 	protected:
 		std::optional<qualified_type> _api_return_type; ///< The return type of the API function.
 		std::vector<parameter_info> _parameters; ///< Information about all parameters.
+		std::string _export_name; ///< The actual name used when exporting.
 		clang::FunctionDecl *_decl = nullptr; ///< The \p clang::FunctionDecl.
 
 		/// Populates \ref _parameters with the set of parameters the exported function should have.
 		virtual void _build_parameter_list(entity_registry &reg) {
 			size_t pos = 0;
 			for (auto &param : _decl->parameters()) { // gather parameter types
-				_parameters.emplace_back(qualified_type::from_clang_type(param->getType(), reg));
+				_parameters.emplace_back(qualified_type::from_clang_type(param->getType(), &reg));
 				for (clang::FunctionDecl *redecl : _decl->redecls()) { // gather parameter name
 					llvm::StringRef name = redecl->parameters()[pos]->getName();
 					if (name.size() > _parameters.back().name.size()) {
@@ -92,7 +98,7 @@ namespace apigen::entities {
 		/// Sets \ref _api_return_type.
 		virtual void _collect_api_return_type(entity_registry &reg) {
 			if (!_decl->isNoReturn()) {
-				_api_return_type.emplace(qualified_type::from_clang_type(_decl->getReturnType(), reg));
+				_api_return_type.emplace(qualified_type::from_clang_type(_decl->getReturnType(), &reg));
 			}
 		}
 	};

@@ -70,7 +70,7 @@ namespace apigen {
 		}
 
 		/// Constructs a \ref qualified_type from the given \p clang::QualType.
-		[[nodiscard]] static qualified_type from_clang_type(const clang::QualType&, entity_registry&);
+		[[nodiscard]] static qualified_type from_clang_type(const clang::QualType&, entity_registry*);
 		/// Constructs a \ref qualified_type from the given \ref entities::user_type_entity.
 		[[nodiscard]] static qualified_type from_clang_type_pointer(const clang::Type*, entity_registry&);
 

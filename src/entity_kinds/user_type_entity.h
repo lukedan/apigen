@@ -14,5 +14,12 @@ namespace apigen::entities {
 		[[nodiscard]] entity_kind get_kind() const override {
 			return kind;
 		}
+
+		/// Returns the user-defined name used when exporting.
+		[[nodiscard]] const std::string &get_substitute_name() const {
+			return _export_name;
+		}
+	protected:
+		std::string _export_name; ///< The actual name used when exporting.
 	};
 }

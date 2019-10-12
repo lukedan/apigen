@@ -44,8 +44,14 @@ namespace apigen::entities {
 		[[nodiscard]] clang::NamedDecl *get_generic_declaration() const override {
 			return _decl;
 		}
+
+		/// Returns the user-defined name used when exporting.
+		[[nodiscard]] const std::string &get_substitute_name() const {
+			return _export_name;
+		}
 	protected:
 		qualified_type _type; ///< The type of this field.
+		std::string _export_name; ///< The actual name used when exporting.
 		record_entity *_parent = nullptr; ///< The parent type.
 		clang::FieldDecl *_decl = nullptr; ///< The declaration associated with this entity.
 	};

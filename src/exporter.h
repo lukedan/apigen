@@ -3,9 +3,8 @@
 /// \file
 /// Used to generate the exported code.
 
-#include <vector>
 #include <unordered_map>
-#include <unordered_set>
+#include <sstream>
 
 #include <fmt/ostream.h> // TODO C++20
 
@@ -13,260 +12,21 @@
 #include "entity_kinds/field_entity.h"
 #include "entity_kinds/user_type_entity.h"
 #include "entity_registry.h"
+#include "cpp_writer.h"
 #include "naming_convention.h"
 
 namespace apigen {
-	/// A wrapper around \p std::ostream that provides additional functionalities for printing C++ code.
-	class cpp_writer {
-	public:
-		/// Represents a scope.
-		struct scope {
-			/// Initializes \ref begin and \ref end.
-			constexpr scope(std::string_view b, std::string_view e) noexcept : begin(b), end(e) {
-			}
-
-			std::string_view
-				begin, ///< The opening sequence of this scope.
-				end; ///< The closing sequence of this scope.
-		};
-
-		inline const static scope
-			parentheses_scope{"(", ")"}, ///< A scope surrounded by parentheses.
-			braces_scope{"{", "}"}; ///< A scope surrounded by brackets.
-
-		/// Initializes \ref _out.
-		explicit cpp_writer(std::ostream &out) : _out(out) {
-		}
-		/// No move construction.
-		cpp_writer(cpp_writer&&) = delete;
-		/// No copy constructor.
-		cpp_writer(const cpp_writer&) = delete;
-		/// No move assignment.
-		cpp_writer &operator=(cpp_writer&&) = delete;
-		/// No copy assignment.
-		cpp_writer &operator=(const cpp_writer&) = delete;
-
-		/// RTTI wrapper for scopes.
-		struct scope_token {
-			friend cpp_writer;
-		public:
-			/// Default constructor.
-			scope_token() = default;
-			/// Move constructor.
-			scope_token(scope_token &&other) noexcept : _out(other._out) {
-			}
-			/// No copy construction.
-			scope_token(const scope_token&) = delete;
-			/// Move assignment.
-			scope_token &operator=(scope_token &&other) noexcept {
-				end();
-				_out = other._out;
-				other._out = nullptr;
-				return *this;
-			}
-			/// No copy assignment.
-			scope_token &operator=(const scope_token&) = delete;
-			/// Calls \ref end().
-			~scope_token() {
-				end();
-			}
-
-			/// Ends the current scope.
-			void end() {
-				if (_out) {
-					_out->_end_scope();
-					_out = nullptr;
-				}
-			}
-		protected:
-			/// Initializes \ref _out.
-			explicit scope_token(cpp_writer *w) : _out(w) {
-			}
-
-			cpp_writer *_out = nullptr; ///< The associated \ref cpp_writer.
-		};
-		/// RTTI wrapper for allocated variable names.
-		struct variable_token {
-			friend cpp_writer;
-		public:
-			/// Default constructor.
-			variable_token() = default;
-			/// Move constructor.
-			variable_token(variable_token &&src) noexcept : _iter(src._iter), _writer(src._writer) {
-				src._writer = nullptr;
-			}
-			/// No copy construction.
-			variable_token(const variable_token&) = delete;
-			/// Move assignment.
-			variable_token &operator=(variable_token &&src) noexcept {
-				discard();
-				_iter = src._iter;
-				_writer = src._writer;
-				src._writer = nullptr;
-				return *this;
-			}
-			/// No copy assignment.
-			variable_token &operator=(const variable_token&) = delete;
-			/// Calls \ref discard() automatically.
-			~variable_token() {
-				discard();
-			}
-
-			/// Returns whether this variable token is empty.
-			[[nodiscard]] bool empty() const {
-				return _writer == nullptr;
-			}
-			/// Returns the variable name.
-			[[nodiscard]] std::string_view get() const {
-				if (_writer) {
-					return *_iter;
-				}
-				return "";
-			}
-
-			/// Discards this variable.
-			void discard() {
-				if (_writer) {
-					_writer->_discard_variable(_iter);
-					_writer = nullptr;
-				}
-			}
-		protected:
-			/// Directly initializes the fields of this struct.
-			variable_token(cpp_writer &w, std::set<std::string>::const_iterator it) : _iter(it), _writer(&w) {
-			}
-
-			std::set<std::string>::const_iterator _iter; ///< The iterator to the underlying allocated name.
-			cpp_writer *_writer = nullptr; ///< The associated \ref cpp_writer object.
-		};
-
-		// variable management
-		/// Tries to register a variable with the given name. A postfix will be appended to the name if there are
-		/// conflicts.
-		variable_token allocate_variable_custom(std::string name) {
-			auto it = _vars.lower_bound(name);
-			if (it != _vars.end() && *it == name) {
-				name += '_';
-				for (size_t i = 2; ; ++i) {
-					std::string num = std::to_string(i);
-					name += num;
-					it = _vars.lower_bound(name);
-					if (it == _vars.end() || *it != name) {
-						break;
-					}
-					name.erase(name.size() - num.size());
-				}
-			}
-			auto result = _vars.emplace_hint(it, std::move(name));
-			return variable_token(*this, result);
-		}
-		/// Tries to register a variable name with a prefix.
-		variable_token allocate_variable_prefix(const char *prefix, std::string name) {
-			if (name.empty()) {
-				name = "unnamed";
-			}
-			return allocate_variable_custom(prefix + std::move(name));
-		}
-
-		/// Allocates the name for a function parameter.
-		variable_token allocate_function_parameter(std::string name) {
-			return allocate_variable_prefix("_apigen_priv_param_", std::move(name));
-		}
-		/// Allocates the name for a local variable.
-		variable_token allocate_local_variable(std::string name) {
-			return allocate_variable_prefix("_apigen_priv_local_", std::move(name));
-		}
-
-		// low-level output formatting
-		/// Directly writes the given object to the output.
-		template <typename T> cpp_writer &write(T &&obj) {
-			_maybe_print_sepearator();
-			_out << std::forward<T>(obj);
-			return *this;
-		}
-		/// Uses \p fmt to format and write to the output stream.
-		template <typename ...Args> cpp_writer &write_fmt(Args &&...args) {
-			_maybe_print_sepearator();
-			fmt::print(_out, std::forward<Args>(args)...);
-			return *this;
-		}
-		/// Starts a new line.
-		cpp_writer &new_line() {
-			write("\n");
-			for (size_t i = 0; i < _scopes.size(); ++i) {
-				write("\t");
-			}
-			for (_scope_rec &scp : _scopes) {
-				scp.has_newline = true;
-			}
-			return *this;
-		}
-		/// Pushes a scope onto \ref _scopes and starts that scope.
-		[[nodiscard]] scope_token begin_scope(scope s) {
-			_scopes.emplace_back(s);
-			write(s.begin);
-			return scope_token(this);
-		}
-		/// Adds a pending separator to the writer. If the next operation is \ref _end_scope(), this separator will be
-		/// discarded; otherwise it will be written to the output before anything else.
-		cpp_writer &maybe_separate(std::string_view text) {
-			_maybe_print_sepearator();
-			_separator = text;
-			return *this;
-		}
-	protected:
-		/// Records the state of a scope.
-		struct _scope_rec {
-			/// Default constructor.
-			_scope_rec() = default;
-			/// Records the given scope.
-			explicit _scope_rec(scope s) : end(s.end) {
-			}
-
-			std::string_view end; ///< The end delimiter of this scope.
-			bool has_newline = false; ///< Whether or not a new line has been written in this scope.
-		};
-
-		/// Prints and clears the separator if it's not empty.
-		void _maybe_print_sepearator() {
-			if (!_separator.empty()) {
-				_out << _separator;
-				_separator = std::string_view();
-			}
-		}
-		/// Ends the bottom-level scope.
-		void _end_scope() {
-			_separator = std::string_view(); // discard separator
-			_scope_rec ended = _scopes.back();
-			_scopes.pop_back();
-			if (ended.has_newline) {
-				new_line();
-			}
-			write(ended.end);
-		}
-
-		/// Removes the allocated variable name from \ref _vars.
-		void _discard_variable(std::set<std::string>::const_iterator iter) {
-			_vars.erase(iter);
-		}
-
-		std::vector<_scope_rec> _scopes; ///< All current scopes.
-		std::set<std::string> _vars; ///< All registered variable names.
-		std::string_view _separator; ///< The pending separator.
-		std::ostream &_out; ///< The output.
-	};
-
 	/// Used to gather and export all entities.
 	class exporter {
 	public:
-		// TODO: resolve overload names
+		// TODO: resolve overload & duplicate names
 		struct function_naming {
 			std::string
 				api_name, ///< The name of the exported function pointer.
 				impl_name; ///< The name of the function that is the internal implementation.
 
 			/// Constructs a \ref function_naming from the given \ref entities::field_entity.
-			inline static function_naming from_entity(entities::function_entity &ent, naming_convention &conv) {
+			inline static function_naming from_entity(entities::function_entity &ent, const naming_convention &conv) {
 				function_naming result;
 				result.api_name = conv.get_function_name_dynamic(ent);
 				result.impl_name = "internal_" + result.api_name;
@@ -282,7 +42,7 @@ namespace apigen {
 				const_getter_impl_name; ///< The name of the const getter's internal implementation.
 
 			/// Constructs a \ref field_naming from the given \ref entities::field_entity.
-			inline static field_naming from_entity(entities::field_entity &ent, naming_convention &conv) {
+			inline static field_naming from_entity(entities::field_entity &ent, const naming_convention &conv) {
 				field_naming result;
 				result.getter_api_name = conv.get_field_getter_name(ent);
 				result.getter_impl_name = "internal_" + result.getter_api_name;
@@ -297,7 +57,7 @@ namespace apigen {
 			std::vector<std::pair<std::int64_t, std::string>> enumerators; ///< The name of all enumerators.
 
 			/// Constructs a \ref enum_naming from the given \ref entities::enum_entity.
-			inline static enum_naming from_entity(entities::enum_entity &ent, naming_convention &conv) {
+			inline static enum_naming from_entity(entities::enum_entity &ent, const naming_convention &conv) {
 				enum_naming result;
 				result.name = conv.get_enum_name(ent);
 				for (clang::EnumConstantDecl *enumerator : ent.get_declaration()->enumerators()) {
@@ -317,7 +77,7 @@ namespace apigen {
 				destructor_impl_name; ///< The name of the internal implementation of the function.
 
 			/// Constructs a \ref record_naming from the given \ref entities::record_entity.
-			inline static record_naming from_entity(entities::record_entity &ent, naming_convention &conv) {
+			inline static record_naming from_entity(entities::record_entity &ent, const naming_convention &conv) {
 				record_naming result;
 				result.name = conv.get_record_name(ent);
 				result.destructor_api_name = conv.get_record_destructor_api_name(ent);
@@ -326,10 +86,12 @@ namespace apigen {
 			}
 		};
 
-		/// Default constructor.
-		exporter() = default;
+		/// Initializes \ref internal_printing_policy.
+		explicit exporter(clang::PrintingPolicy policy) : internal_printing_policy(std::move(policy)) {
+		}
 		/// Initializes \ref naming.
-		explicit exporter(naming_convention &conv) : naming(&conv) {
+		exporter(clang::PrintingPolicy policy, const naming_convention &conv) :
+			internal_printing_policy(std::move(policy)), naming(&conv) {
 		}
 
 		/// Collects exported entities from the given \ref entity_registry.
@@ -399,6 +161,14 @@ namespace apigen {
 			}
 			writer.write(";");
 		}
+		/// Exports the definition of an API class destructor.
+		void _export_api_destructor_definition(
+			cpp_writer &writer, entities::record_entity *entity, const record_naming &name
+		) const {
+			writer
+				.new_line()
+				.write_fmt("void (*{})({} *);", name.destructor_api_name, name.name);
+		}
 		/// Exports the definition of API field getters.
 		void _export_api_field_getter_definitions(
 			cpp_writer &writer, entities::field_entity *entity, const field_naming &name
@@ -439,6 +209,9 @@ namespace apigen {
 				auto scope = writer.begin_scope(cpp_writer::braces_scope);
 				for (auto &&[ent, name] : _function_names) {
 					_export_api_function_pointer_definition(writer, ent, name);
+				}
+				for (auto &&[ent, name] : _record_names) {
+					_export_api_destructor_definition(writer, ent, name);
 				}
 				for (auto &&[ent, name] : _field_names) {
 					_export_api_field_getter_definitions(writer, ent, name);
@@ -495,9 +268,9 @@ namespace apigen {
 				{ // the optional placement new scope
 					cpp_writer::scope_token scope1;
 					if (complex_return) {
-						auto *return_type = entity->get_api_return_type().value().type->getAsTagDecl();
+						auto *return_type = entity->get_api_return_type().value().type;
 						writer.write_fmt(
-							"new ({}) {}", parameters.back().get(), return_type->getQualifiedNameAsString()
+							"new ({}) {}", parameters.back().get(), _get_internal_type_name(return_type)
 						);
 						scope1 = writer.begin_scope(cpp_writer::parentheses_scope);
 					} else if (auto &return_type = entity->get_api_return_type()) { // simple return
@@ -515,13 +288,13 @@ namespace apigen {
 							auto *method_decl = llvm::cast<clang::CXXMethodDecl>(method_ent->get_declaration());
 							auto *decl = method_decl->getParent();
 							if (method_ent->is_static()) { // export static member function call
-								writer.write_fmt("{}::", decl->getQualifiedNameAsString());
+								writer.write_fmt("{}::", _get_internal_entity_name(decl));
 							} else { // non-static, export member function call
 								assert_true(param_it->type.qualifiers.size() == 2);
 								assert_true(param_it->type.ref_kind == reference_kind::none);
 								writer.write_fmt(
 									"reinterpret_cast<{} {}*>({})->",
-									decl->getQualifiedNameAsString(),
+									_get_internal_entity_name(decl),
 									param_it->type.qualifiers.back(),
 									param_name_it->get()
 								);
@@ -531,7 +304,7 @@ namespace apigen {
 							writer.write(to_string_view(method_decl->getName()));
 						}
 					} else { // normal function, print function name
-						writer.write(entity->get_declaration()->getQualifiedNameAsString());
+						writer.write(_get_internal_entity_name(entity->get_declaration()));
 					}
 					{ // parameters
 						auto scope2 = writer.begin_scope(cpp_writer::parentheses_scope);
@@ -556,6 +329,72 @@ namespace apigen {
 				}
 			}
 		}
+		/// Exports the implementations of field getters.
+		void _export_field_getter_impls(cpp_writer &writer, entities::field_entity *entity, const field_naming &name) const {
+			auto &type = entity->get_type();
+			auto parent_it = _record_names.find(entity->get_parent());
+			assert_true(parent_it != _record_names.end());
+
+			// TODO the non-const getter may not exist
+			{ // non-const getter
+				auto input = writer.allocate_function_parameter("object");
+				writer
+					.new_line()
+					.new_line()
+					.write_fmt("{} *", _get_exported_type_name(type.type, type.type_entity));
+				_export_api_pointer_and_qualifiers(writer, type.ref_kind, type.qualifiers);
+				writer.write_fmt("{}({} *{}) ", name.getter_impl_name, parent_it->second.name, input.get());
+				{
+					auto scope = writer.begin_scope(cpp_writer::braces_scope);
+					writer
+						.new_line()
+						.write_fmt(
+							"return &reinterpret_cast<{} *>({})->{};",
+							_get_internal_entity_name(entity->get_parent()->get_declaration()),
+							input.get(), to_string_view(entity->get_declaration()->getName())
+						);
+				}
+			}
+
+			{ // const getter
+				auto input = writer.allocate_function_parameter("object");
+				writer
+					.new_line()
+					.new_line()
+					.write_fmt("{} const *", _get_exported_type_name(type.type, type.type_entity));
+				_export_api_pointer_and_qualifiers(writer, type.ref_kind, type.qualifiers);
+				writer.write_fmt(" {}({} const *{}) ", name.getter_impl_name, parent_it->second.name, input.get());
+				{
+					auto scope = writer.begin_scope(cpp_writer::braces_scope);
+					writer
+						.new_line()
+						.write_fmt(
+							"return &reinterpret_cast<{} const *>({})->{};",
+							_get_internal_entity_name(entity->get_parent()->get_declaration()),
+							input.get(), to_string_view(entity->get_declaration()->getName())
+						);
+				}
+			}
+		}
+		/// Exports the destructor implementation.
+		void _export_destructor_impl(
+			cpp_writer &writer, entities::record_entity *entity, const record_naming &name
+		) const {
+			auto input = writer.allocate_function_parameter("object");
+			writer
+				.new_line()
+				.write_fmt("void {}({} *{}) ", name.destructor_impl_name, name.name, input.get());
+			{
+				auto scope = writer.begin_scope(cpp_writer::braces_scope);
+				writer
+					.new_line()
+					.write_fmt(
+						"reinterpret_cast<{} *>({})->~{}();",
+						_get_internal_entity_name(entity->get_declaration()),
+						input.get(), to_string_view(entity->get_declaration()->getName())
+					);
+			}
+		}
 	public:
 		/// Exports the host CPP file that holds the implementation of all API functions. The user has to manually add
 		/// <cc>#include</cc> directives of the host header and the API header.
@@ -566,6 +405,12 @@ namespace apigen {
 				auto scope = writer.begin_scope(cpp_writer::braces_scope);
 				for (auto &&[ent, name] : _function_names) {
 					_export_function_impl(writer, ent, name);
+				}
+				for (auto &&[ent, name] : _record_names) {
+					_export_destructor_impl(writer, ent, name);
+				}
+				for (auto &&[ent, name] : _field_names) {
+					_export_field_getter_impls(writer, ent, name);
 				}
 			}
 			{
@@ -590,6 +435,15 @@ namespace apigen {
 								result_var.get(), name.api_name, APIGEN_API_CLASS_NAME_STR, name.impl_name
 							);
 					}
+					for (auto &&[record, name] : _record_names) {
+						writer
+							.new_line()
+							.write_fmt(
+								"{}.{} = {}::{};",
+								result_var.get(), name.destructor_api_name,
+								APIGEN_API_CLASS_NAME_STR, name.destructor_impl_name
+							);
+					}
 					for (auto &&[field, name] : _field_names) {
 						writer
 							.new_line()
@@ -605,20 +459,12 @@ namespace apigen {
 								APIGEN_API_CLASS_NAME_STR, name.const_getter_impl_name
 							);
 					}
-					for (auto &&[record, name] : _record_names) {
-						writer
-							.new_line()
-							.write_fmt(
-								"{}.{} = {}::{};",
-								result_var.get(), name.destructor_api_name,
-								APIGEN_API_CLASS_NAME_STR, name.destructor_impl_name
-							);
-					}
 				}
 			}
 		}
 
-		naming_convention *naming = nullptr; ///< The naming convention of exported types and functions.
+		clang::PrintingPolicy internal_printing_policy; ///< The \p clang::PrintingPolicy of internal classes.
+		const naming_convention *naming = nullptr; ///< The naming convention of exported types and functions.
 	protected:
 		/// Mapping between functions and their exported names.
 		std::unordered_map<entities::function_entity*, function_naming> _function_names;
@@ -649,22 +495,233 @@ namespace apigen {
 			}
 			return "$UNSUPPORTED";
 		}
-		/// Returns the internal name of a type.
-		std::string _get_internal_type_name(const clang::Type *type) const {
-			clang::PrintingPolicy policy{clang::LangOptions()}; // TODO HACK
+		/// Returns the internal name of an operator name.
+		inline static std::string_view _get_internal_operator_name(clang::OverloadedOperatorKind kind) {
+			switch (kind) {
+			case clang::OO_New:
+				return "operator new";
+			case clang::OO_Delete:
+				return "operator delete";
+			case clang::OO_Array_New:
+				return "operator new[]";
+			case clang::OO_Array_Delete:
+				return "operator delete[]";
+			case clang::OO_Plus:
+				return "operator+";
+			case clang::OO_Minus:
+				return "operator-";
+			case clang::OO_Star:
+				return "operator*";
+			case clang::OO_Slash:
+				return "operator/";
+			case clang::OO_Percent:
+				return "operator%";
+			case clang::OO_Caret:
+				return "operator^";
+			case clang::OO_Amp:
+				return "operator&";
+			case clang::OO_Pipe:
+				return "operator|";
+			case clang::OO_Tilde:
+				return "operator~";
+			case clang::OO_Exclaim:
+				return "operator!";
+			case clang::OO_Equal:
+				return "operator=";
+			case clang::OO_Less:
+				return "operator<";
+			case clang::OO_Greater:
+				return "operator>";
+			case clang::OO_PlusEqual:
+				return "operator+=";
+			case clang::OO_MinusEqual:
+				return "operator-=";
+			case clang::OO_StarEqual:
+				return "operator*=";
+			case clang::OO_SlashEqual:
+				return "operator/=";
+			case clang::OO_PercentEqual:
+				return "operator%=";
+			case clang::OO_CaretEqual:
+				return "operator^=";
+			case clang::OO_AmpEqual:
+				return "operator&=";
+			case clang::OO_PipeEqual:
+				return "operator|=";
+			case clang::OO_LessLess:
+				return "operator<<";
+			case clang::OO_GreaterGreater:
+				return "operator>>";
+			case clang::OO_LessLessEqual:
+				return "operator<<=";
+			case clang::OO_GreaterGreaterEqual:
+				return "operator>>=";
+			case clang::OO_EqualEqual:
+				return "operator==";
+			case clang::OO_ExclaimEqual:
+				return "operator!=";
+			case clang::OO_LessEqual:
+				return "operator<=";
+			case clang::OO_GreaterEqual:
+				return "operator>=";
+			case clang::OO_Spaceship:
+				return "operator<=>";
+			case clang::OO_AmpAmp:
+				return "operator&&";
+			case clang::OO_PipePipe:
+				return "operator||";
+			case clang::OO_PlusPlus:
+				return "operator++";
+			case clang::OO_MinusMinus:
+				return "operator--";
+			case clang::OO_Comma:
+				return "operator,";
+			case clang::OO_ArrowStar:
+				return "operator->*";
+			case clang::OO_Arrow:
+				return "operator->";
+			case clang::OO_Call:
+				return "operator()";
+			case clang::OO_Subscript:
+				return "operator[]";
+			case clang::OO_Coawait:
+				return "operator co_await";
+			default:
+				return "$BAD_OPERATOR";
+			}
+		}
+		/// Returns the spelling of the given \p clang::TemplateArgument.
+		[[nodiscard]] std::string _get_template_argument_spelling(const clang::TemplateArgument &arg) const {
+			switch (arg.getKind()) {
+			case clang::TemplateArgument::Null:
+				return "$ERROR_NULL";
+			case clang::TemplateArgument::Type:
+				{
+					// TODO this breaks for array types
+					auto type = qualified_type::from_clang_type(arg.getAsType(), nullptr);
+					std::string result = _get_internal_type_name(type.type) + " ";
+					result += _get_internal_pointer_and_qualifiers(type.ref_kind, type.qualifiers);
+					return result;
+				}
+		    // The template argument is a declaration that was provided for a pointer,
+		    // reference, or pointer to member non-type template parameter.
+			case clang::TemplateArgument::Declaration:
+				break;
+			case clang::TemplateArgument::NullPtr:
+				return "nullptr";
+			case clang::TemplateArgument::Integral:
+				return arg.getAsIntegral().toString(10);
+		    // The template argument is a template name that was provided for a
+		    // template template parameter.
+			case clang::TemplateArgument::Template:
+				break;
+		    // The template argument is a pack expansion of a template name that was
+		    // provided for a template template parameter.
+			case clang::TemplateArgument::TemplateExpansion:
+				break;
+			case clang::TemplateArgument::Expression:
+				return "$UNSUPPORTED_TEMPLATE_ARG";
+			case clang::TemplateArgument::Pack:
+				return _get_template_argument_list_spelling(arg.getPackAsArray());
+			}
+			return "$UNSUPPORTED_TEMPLATE_ARG";
 
+			/*std::string result;
+			llvm::raw_string_ostream stream(result);
+			arg.print(internal_printing_policy, stream);
+			stream.str();
+			return result;*/
+		}
+		/// Returns the spelling of a whole template argument list, excluding angle brackets.
+		[[nodiscard]] std::string _get_template_argument_list_spelling(
+			llvm::ArrayRef<clang::TemplateArgument> args
+		) const {
+			bool first = true;
+			std::string result;
+			for (auto &arg : args) {
+				if (!result.empty()) {
+					result += ", ";
+				}
+				result += _get_template_argument_spelling(arg);
+			}
+			return result;
+		}
+		/// Returns the internal name of a function or a type.
+		std::string _get_internal_entity_name(clang::DeclContext *decl) const {
+			std::string result;
+			if (auto *func_decl = llvm::dyn_cast<clang::FunctionDecl>(decl)) {
+				clang::OverloadedOperatorKind op_kind = func_decl->getOverloadedOperator();
+				if (op_kind == clang::OO_None) {
+					result = llvm::cast<clang::NamedDecl>(decl)->getName().str();
+				} else {
+					result = _get_internal_operator_name(op_kind);
+				}
+			} else {
+				if (auto *template_decl = llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(decl)) {
+					result =
+						"<" + _get_template_argument_list_spelling(template_decl->getTemplateArgs().asArray()) + ">";
+				}
+				result = llvm::cast<clang::NamedDecl>(decl)->getName().str() + result;
+			}
+			result = "::" + result;
+
+			for (
+				clang::DeclContext *current = decl->getParent();
+				current && !current->isTranslationUnit();
+				current = current->getParent()
+			) {
+				if (auto *record_decl = llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(current)) {
+					result =
+						"<" + _get_template_argument_list_spelling(record_decl->getTemplateArgs().asArray()) +
+						">" + result;
+				}
+				auto *named_decl = llvm::dyn_cast<clang::NamedDecl>(decl);
+				assert_true(named_decl);
+				result = "::" + named_decl->getName().str() + result;
+			}
+			return result;
+		}
+		/// \overload
+		std::string _get_internal_type_name(const clang::Type *type) const {
 			if (auto *builtin = llvm::dyn_cast<clang::BuiltinType>(type)) {
-				return std::string(to_string_view(builtin->getName(policy)));
+				return std::string(to_string_view(builtin->getName(internal_printing_policy)));
 			}
 			if (auto *tagty = llvm::dyn_cast<clang::TagType>(type)) {
-				return tagty->getAsTagDecl()->getQualifiedNameAsString();
+				return _get_internal_entity_name(tagty->getAsTagDecl());
 			}
 			return "$UNSUPPORTED";
 		}
+		/// Wrapper around \ref _write_internal_pointer_and_qualifiers() that returns the result as a string.
+		inline static std::string _get_internal_pointer_and_qualifiers(
+			reference_kind ref, const std::vector<qualifier> &quals
+		) {
+			std::stringstream ss;
+			_write_internal_pointer_and_qualifiers(ss, ref, quals);
+			return ss.str();
+		}
+		/// Writes asterisks, amperesands, and qualifiers for an internal type to the given stream.
+		inline static void _write_internal_pointer_and_qualifiers(
+			std::ostream &out, reference_kind ref, const std::vector<qualifier> &quals
+		) {
+			out << quals.front();
+			switch (ref) { // ampersand
+			case reference_kind::reference:
+				out << "&";
+				break;
+			case reference_kind::rvalue_reference:
+				out << "&&";
+				break;
+			default:
+				break;
+			}
+			for (auto it = ++quals.begin(); it != quals.end(); ++it) {
+				out << "*" << *it;
+			}
+		}
 		/// Exports asterisks and qualifiers for an exported type.
-		void _export_api_pointer_and_qualifiers(
+		inline static void _export_api_pointer_and_qualifiers(
 			cpp_writer &writer, reference_kind ref, const std::vector<qualifier> &quals
-		) const {
+		) {
 			writer.write(quals.front());
 			if (ref != reference_kind::none) {
 				writer.write('*');

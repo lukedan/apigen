@@ -53,6 +53,11 @@ namespace apigen {
 			clang::ParseAST(_compiler.getPreprocessor(), &_compiler.getASTConsumer(), _compiler.getASTContext());
 			_compiler.getDiagnosticClient().EndSourceFile();
 		}
+
+		/// Returns the underlying \p clang::CompilerInstance.
+		const clang::CompilerInstance &get_compiler() const {
+			return _compiler;
+		}
 	protected:
 		/// Used when parsing files to extract definitions.
 		struct _ast_visitor : public clang::RecursiveASTVisitor<_ast_visitor> {

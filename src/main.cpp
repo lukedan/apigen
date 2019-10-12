@@ -6,6 +6,7 @@
 #include "entity_registry.h"
 #include "exporter.h"
 #include "parser.h"
+#include "basic_naming_convention.h"
 
 using namespace apigen;
 
@@ -23,12 +24,11 @@ int main(int argc, char **argv) {
 	p.parse(reg);
 	dep_analyzer.analyze(reg);
 
-	fmt_naming_convention naming;
-	exporter exp;
-
+	basic_naming_convention naming;
 	naming.api_struct_name = "api";
 	naming.api_struct_init_function_name = "init_api";
-	exp.naming = &naming;
+
+	exporter exp(p.get_compiler().getASTContext().getPrintingPolicy(), naming);
 	exp.collect_exported_entities(reg);
 
 	{

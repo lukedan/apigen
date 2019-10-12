@@ -58,6 +58,8 @@ target_sources(apigen
 		src/entity_kinds/record_entity.cpp
 		src/entity_kinds/record_entity.h
 		src/entity_kinds/user_type_entity.h
+		src/basic_naming_convention.h
+		src/cpp_writer.h
 		src/dependency_analyzer.cpp
 		src/dependency_analyzer.h
 		src/entity.cpp

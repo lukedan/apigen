@@ -6,7 +6,7 @@
 #include "entity_registry.h"
 
 namespace apigen {
-	qualified_type qualified_type::from_clang_type(const clang::QualType &orig_type, entity_registry &registry) {
+	qualified_type qualified_type::from_clang_type(const clang::QualType &orig_type, entity_registry *registry) {
 		qualified_type result;
 		clang::QualType canon_type = orig_type.getCanonicalType();
 		if (canon_type->isReferenceType()) { // reference
@@ -27,9 +27,11 @@ namespace apigen {
 			}
 		}
 		result.type = canon_type.getTypePtr();
-		if (auto *tag_type = llvm::dyn_cast<clang::TagType>(result.type)) {
-			entity *ent = registry.find_or_register_parsed_entity(tag_type->getAsTagDecl());
-			result.type_entity = cast<entities::user_type_entity>(ent);
+		if (registry) {
+			if (auto *tag_type = llvm::dyn_cast<clang::TagType>(result.type)) {
+				entity *ent = registry->find_or_register_parsed_entity(tag_type->getAsTagDecl());
+				result.type_entity = cast<entities::user_type_entity>(ent);
+			}
 		}
 		return result;
 	}

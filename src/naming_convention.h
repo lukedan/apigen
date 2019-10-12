@@ -4,6 +4,7 @@
 /// Used to determine the names of exported entities.
 
 #include <string>
+#include <map>
 
 #include "entity.h"
 #include "entity_kinds/constructor_entity.h"
@@ -13,6 +14,7 @@
 #include "entity_kinds/method_entity.h"
 #include "entity_kinds/record_entity.h"
 #include "entity_kinds/user_type_entity.h"
+#include "entity_registry.h"
 
 namespace apigen {
 	/// Determines the names of exported entities.
@@ -99,9 +101,15 @@ namespace apigen {
 			api_struct_init_function_name;
 	};
 
-	/// Naming information of overloaded operators.
-	struct overloaded_operator_naming {
+	/// Naming information of special functions such as constructors, destructors, and overloaded operators.
+	struct special_function_naming {
 		std::string_view
+			constructor_name{"ctor"}, ///< The name of constructors.
+			destructor_name{"dtor"}, ///< The name of destructors.
+
+			getter_name{"getter"}, ///< The name of field getters.
+			const_getter_name{"const_getter"}, ///< The name of const getters.
+
 			new_name{"new"}, ///< The name of <cc>operator new</cc>.
 			delete_name{"delete"}, ///< The name of <cc>operator delete</cc>.
 			array_new_name{"array_new"}, ///< The name of <cc>operator new[]</cc>.
@@ -148,7 +156,7 @@ namespace apigen {
 			coawait_name{"co_await"}; ///< The name of <cc>operator co_await</cc>.
 
 		/// Retrieves the name that corresponds to the given overloaded operator.
-		[[nodiscard]] std::string_view get_name(clang::OverloadedOperatorKind op) const {
+		[[nodiscard]] std::string_view get_operator_name(clang::OverloadedOperatorKind op) const {
 			switch (op) {
 			case clang::OO_None:                return "";
 			case clang::OO_New:                 return new_name;
@@ -195,160 +203,10 @@ namespace apigen {
 			case clang::OO_Call:                return call_name;
 			case clang::OO_Subscript:           return subscript_name;
 			case clang::OO_Conditional:         return "$ERROR_SHOULDNT_HAPPEN";
-			case clang::OO_Coawait:             return coawait_name;
+			case clang::OO_Coawait:             return coawait_name; // TODO look into this
+			default:
+				return "$BAD_OPERATOR";
 			}
-		}
-	};
-
-	/// A naming convention that uses string formatters to generate names.
-	class fmt_naming_convention : public naming_convention {
-	public:
-		/// Returns the function name.
-		[[nodiscard]] std::string get_function_name(const entities::function_entity &entity) const override {
-			using namespace fmt::literals;
-
-			auto *decl = entity.get_declaration();
-			return fmt::format(
-				function_name_pattern,
-				"scope"_a = _get_scope_name(decl),
-				"name"_a = _get_function_name(decl)
-			);
-		}
-		/// Returns the method name.
-		[[nodiscard]] std::string get_method_name(const entities::method_entity &entity) const override {
-			using namespace fmt::literals;
-
-			auto *decl = entity.get_declaration();
-			auto *parent = llvm::cast<clang::CXXRecordDecl>(decl->getParent());
-			return fmt::format(
-				method_name_pattern,
-				"scope"_a = _get_scope_name(parent),
-				"class"_a = to_string_view(parent->getName()),
-				"name"_a = _get_function_name(decl)
-			);
-		}
-		/// Returns the constructor name.
-		[[nodiscard]] std::string get_constructor_name(const entities::constructor_entity &entity) const override {
-			using namespace fmt::literals;
-
-			auto *decl = entity.get_declaration();
-			auto *parent = llvm::cast<clang::CXXRecordDecl>(decl->getParent());
-			return fmt::format(
-				constructor_name_pattern,
-				"scope"_a = _get_scope_name(parent),
-				"class"_a = to_string_view(parent->getName())
-			);
-		}
-
-		/// Returns the type name.
-		[[nodiscard]] std::string get_user_type_name(const entities::user_type_entity &entity) const override {
-			using namespace fmt::literals;
-
-			auto *decl = llvm::cast<clang::TagDecl>(entity.get_generic_declaration());
-			return fmt::format(
-				user_type_name_pattern,
-				"scope"_a = _get_scope_name(decl),
-				"name"_a = to_string_view(decl->getName())
-			);
-		}
-
-		/// Returns the exported name of the destructor of the given \ref entities::record_entity.
-		[[nodiscard]] std::string get_record_destructor_api_name(
-			const entities::record_entity &entity
-		) const override {
-			using namespace fmt::literals;
-
-			auto *decl = entity.get_declaration();
-			return fmt::format(
-				destructor_name_pattern,
-				"scope"_a = _get_scope_name(decl),
-				"class"_a = to_string_view(decl->getName())
-			);
-		}
-
-		/// Returns the name of an enumerator in the enum declaration.
-		[[nodiscard]] std::string get_enumerator_name(
-			const entities::enum_entity &entity, clang::EnumConstantDecl *enumerator
-		) const override {
-			using namespace fmt::literals;
-
-			auto *decl = entity.get_declaration();
-			return fmt::format(
-				enumerator_name_pattern,
-				"scope"_a = _get_scope_name(decl),
-				"type"_a = to_string_view(decl->getName()),
-				"name"_a = to_string_view(enumerator->getName())
-			);
-		}
-
-		/// Returns the exported name of the non-const getter of the given field.
-		[[nodiscard]] std::string get_field_getter_name(const entities::field_entity &entity) const override {
-			using namespace fmt::literals;
-
-			auto *decl = entity.get_declaration();
-			auto *parent = decl->getParent();
-			return fmt::format(
-				field_getter_name_pattern,
-				"scope"_a = _get_scope_name(parent),
-				"class"_a = to_string_view(parent->getName()),
-				"name"_a = to_string_view(decl->getName())
-			);
-		}
-		/// Returns the exportedname of the const getter of the given field.
-		[[nodiscard]] std::string get_field_const_getter_name(const entities::field_entity &entity) const override {
-			using namespace fmt::literals;
-
-			auto *decl = entity.get_declaration();
-			auto *parent = decl->getParent();
-			return fmt::format(
-				field_const_getter_name_pattern,
-				"scope"_a = _get_scope_name(parent),
-				"class"_a = to_string_view(parent->getName()),
-				"name"_a = to_string_view(decl->getName())
-			);
-		}
-
-		overloaded_operator_naming operator_naming; ///< Naming information of overloaded operators.
-		std::string_view
-			scope_separator{"_"}, ///< Separator between scopes.
-			function_name_pattern{"{scope}_{name}"}, ///< The pattern for function names.
-			method_name_pattern{"{scope}_{class}_{name}"}, ///< The pattern for method names.
-			constructor_name_pattern{"{scope}_{class}_ctor"}, ///< The pattern for constructor names.
-			user_type_name_pattern{"{scope}_{name}"}, ///< The pattern for user type names.
-			destructor_name_pattern{"{scope}_{class}_dtor"}, ///< The pattern for destructor names.
-			enumerator_name_pattern{"{scope}_{type}_{name}"}, ///< The pattern for enumerator names.
-			/// The pattern for field getter names.
-			field_getter_name_pattern{"{scope}_{class}_{name}_getter"},
-			/// The pattern for field const getter names.
-			field_const_getter_name_pattern{"{scope}_{class}_{name}_const_getter"};
-	protected:
-		/// Returns the concatenated names of all parent scopes of the given declaration.
-		[[nodiscard]] inline static std::string _get_scope_name(
-			clang::DeclContext *context, std::string_view separator
-		) {
-			std::string result;
-			for (clang::DeclContext *current = context->getParent(); current; current = current->getParent()) {
-				if (auto *named = llvm::dyn_cast<clang::NamedDecl>(current)) {
-					// TODO optimization opportunity
-					if (!result.empty()) {
-						result = std::string(separator) + result;
-					}
-					result = std::string(to_string_view(named->getName())) + result;
-				}
-			}
-			return result;
-		}
-		/// \overload
-		[[nodiscard]] std::string _get_scope_name(clang::DeclContext *context) const {
-			return _get_scope_name(context, scope_separator);
-		}
-
-		/// Returns the name of the given function.
-		[[nodiscard]] std::string_view _get_function_name(clang::FunctionDecl *decl) const {
-			if (decl->isOverloadedOperator()) {
-				return operator_naming.get_name(decl->getOverloadedOperator());
-			}
-			return to_string_view(decl->getName());
 		}
 	};
 }

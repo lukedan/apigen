@@ -34,7 +34,7 @@ namespace apigen::entities {
 			if (is_static()) {
 				return std::nullopt;
 			}
-			return qualified_type::from_clang_type(llvm::cast<clang::CXXMethodDecl>(_decl)->getThisType(), reg);
+			return qualified_type::from_clang_type(llvm::cast<clang::CXXMethodDecl>(_decl)->getThisType(), &reg);
 		}
 	protected:
 		/// Prepends a this parameter to the parameter list if necessary.
