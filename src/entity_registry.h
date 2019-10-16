@@ -80,15 +80,24 @@ namespace apigen {
 		) {
 			Decl *decl = llvm::cast<Decl>(non_canon_decl->getCanonicalDecl());
 			bool bad = false;
+
 			// check if this is a dependent decl
 			if constexpr (std::is_base_of_v<clang::DeclContext, Decl>) { // covers functions, records, and enums
 				bad = bad || decl->isDependentContext();
 			} else if constexpr (std::is_same_v<clang::FieldDecl, Decl>) { // fields
 				bad = bad || decl->getParent()->isDependentContext();
 			}
-			if constexpr (std::is_same_v<clang::CXXRecordDecl, Decl>) { // check if this is a local class
+
+			// check if this is a local class
+			if constexpr (std::is_same_v<clang::CXXRecordDecl, Decl>) {
 				bad = bad || decl->isLocalClass();
 			}
+
+			// check if this function is deleted
+			if constexpr (std::is_base_of_v<clang::FunctionDecl, Decl>) {
+				bad = bad || decl->isDeleted();
+			}
+
 			if (bad) { // don't handle this decl
 				return {_decl_mapping.end(), false};
 			}
@@ -117,6 +126,10 @@ namespace apigen {
 			}
 			return {found, false};
 		}
+		/// Returns the value indicating that entity creation is rejected.
+		[[nodiscard]] std::pair<_decl_mapping_t::iterator, bool> _reject_entity_creation() {
+			return {_decl_mapping.end(), false};
+		}
 		/// Dynamic version of \ref _find_or_create_entity_static().
 		std::pair<_decl_mapping_t::iterator, bool> _find_or_create_entity_dynamic(clang::NamedDecl *non_canon_decl) {
 			auto *decl = llvm::cast<clang::NamedDecl>(non_canon_decl->getCanonicalDecl());
@@ -124,7 +137,15 @@ namespace apigen {
 			if (found == _decl_mapping.end() || found->first != decl) { // not found
 				std::unique_ptr<entity> new_entity;
 				if (auto *func_decl = llvm::dyn_cast<clang::FunctionDecl>(decl)) {
+					if (func_decl->isDeleted()) { // the function must not be deleted
+						return _reject_entity_creation();
+					}
 					if (auto *method_decl = llvm::dyn_cast<clang::CXXMethodDecl>(func_decl)) {
+						// when analyzing dependency, destructor decls can be found. we do not want them since they
+						// already come with the records
+						if (llvm::isa<clang::CXXDestructorDecl>(method_decl)) {
+							return _reject_entity_creation();
+						}
 						if (auto *constructor_decl = llvm::dyn_cast<clang::CXXConstructorDecl>(method_decl)) {
 							new_entity = std::make_unique<entities::constructor_entity>(constructor_decl);
 						} else {
@@ -139,12 +160,10 @@ namespace apigen {
 					new_entity = std::make_unique<entities::field_entity>(field_decl);
 				} else if (auto *enum_decl = llvm::dyn_cast<clang::EnumDecl>(decl)) {
 					new_entity = std::make_unique<entities::enum_entity>(enum_decl);
+				} else { // do not need to register this entity
+					return _reject_entity_creation();
 				}
-				if (new_entity) {
-					return {_decl_mapping.emplace_hint(found, decl, std::move(new_entity)), true};
-				} else { // do not need to register this entity or handle this declaration
-					return {_decl_mapping.end(), false};
-				}
+				return {_decl_mapping.emplace_hint(found, decl, std::move(new_entity)), true};
 			}
 			return {found, false};
 		}

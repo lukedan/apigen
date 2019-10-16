@@ -30,6 +30,11 @@ namespace apigen::entities {
 			// nothing to do
 		}
 
+		/// Returns the underlying integer type.
+		[[nodiscard]] const clang::Type *get_integer_type() const {
+			return _decl->getIntegerType().getTypePtr();
+		}
+
 		/// Returns \ref _decl.
 		[[nodiscard]] clang::EnumDecl *get_declaration() const {
 			return _decl;

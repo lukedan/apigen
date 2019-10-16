@@ -101,7 +101,7 @@ endif()
 if(MSVC)
 	target_compile_options(apigen
 		PRIVATE
-			/W3 /Zi)
+			/W4 /Zi /experimental:external /external:anglebrackets /external:W0)
 	target_link_options(apigen
 		PRIVATE
 			/DEBUG)

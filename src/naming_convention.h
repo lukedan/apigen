@@ -25,43 +25,43 @@ namespace apigen {
 
 		// functions used to get the names of an entity
 		/// Returns the name of the given \ref entities::function_entity.
-		[[nodiscard]] virtual std::string get_function_name(const entities::function_entity&) const = 0;
+		[[nodiscard]] virtual std::string get_function_name(const entities::function_entity&) = 0;
 		/// Returns the name of the given \ref entities::method_entity.
-		[[nodiscard]] virtual std::string get_method_name(const entities::method_entity&) const = 0;
+		[[nodiscard]] virtual std::string get_method_name(const entities::method_entity&) = 0;
 		/// Returns the name of the given \ref entities::constructor_entity.
-		[[nodiscard]] virtual std::string get_constructor_name(const entities::constructor_entity&) const = 0;
+		[[nodiscard]] virtual std::string get_constructor_name(const entities::constructor_entity&) = 0;
 
 		/// Returns the name of the given \ref entities::user_type_entity.
-		[[nodiscard]] virtual std::string get_user_type_name(const entities::user_type_entity&) const = 0;
+		[[nodiscard]] virtual std::string get_user_type_name(const entities::user_type_entity&) = 0;
 		/// Returns the name of the given \ref entities::record_entity. By default this function returns the result of
 		/// \ref get_user_type_name().
-		[[nodiscard]] virtual std::string get_record_name(const entities::record_entity &ent) const {
+		[[nodiscard]] virtual std::string get_record_name(const entities::record_entity &ent) {
 			return get_user_type_name(ent);
 		}
 		/// Returns the name of the given \ref entities::enum_entity. By default this function returns the result of
 		/// \ref get_user_type_name().
-		[[nodiscard]] virtual std::string get_enum_name(const entities::enum_entity &ent) const {
+		[[nodiscard]] virtual std::string get_enum_name(const entities::enum_entity &ent) {
 			return get_user_type_name(ent);
 		}
 
 		// functions used to get names related to an entity
 		/// Returns the exported name of the destructor of the given \ref entities::record_entity.
-		[[nodiscard]] virtual std::string get_record_destructor_api_name(const entities::record_entity&) const = 0;
+		[[nodiscard]] virtual std::string get_record_destructor_name(const entities::record_entity&) = 0;
 
 		/// Returns the name of an enumerator in the enum declaration.
 		[[nodiscard]] virtual std::string get_enumerator_name(
 			const entities::enum_entity&, clang::EnumConstantDecl*
-		) const = 0;
+		) = 0;
 
 		/// Returns the exported name of the non-const getter of the given field.
-		[[nodiscard]] virtual std::string get_field_getter_name(const entities::field_entity&) const = 0;
+		[[nodiscard]] virtual std::string get_field_getter_name(const entities::field_entity&) = 0;
 		/// Returns the exportedname of the const getter of the given field.
-		[[nodiscard]] virtual std::string get_field_const_getter_name(const entities::field_entity&) const = 0;
+		[[nodiscard]] virtual std::string get_field_const_getter_name(const entities::field_entity&) = 0;
 
 		// functions below are used to dispatch the call to the corresponding type
 		/// Dispatches the call to \ref get_enum_name() or \ref get_record_name() depending on the actual type of the
 		/// given \ref entities::uesr_type_entity.
-		[[nodiscard]] std::string get_user_type_name_dynamic(const entities::user_type_entity &ent) const {
+		[[nodiscard]] std::string get_user_type_name_dynamic(const entities::user_type_entity &ent) {
 			if (auto *record_ent = dyn_cast<entities::record_entity>(&ent)) {
 				return get_record_name(*record_ent);
 			}
@@ -72,7 +72,7 @@ namespace apigen {
 		}
 		/// Dispatches the call to \ref get_function_name(), \ref get_method_name(), or \ref get_constructor_name()
 		/// depending on the actual type of the given \ref entities::uesr_type_entity.
-		[[nodiscard]] std::string get_function_name_dynamic(const entities::function_entity &ent) const {
+		[[nodiscard]] std::string get_function_name_dynamic(const entities::function_entity &ent) {
 			if (auto *method_ent = dyn_cast<entities::method_entity>(&ent)) {
 				if (auto *constructor_ent = dyn_cast<entities::constructor_entity>(method_ent)) {
 					return get_constructor_name(*constructor_ent);
@@ -84,7 +84,7 @@ namespace apigen {
 
 		/// Dispatches the call to the one corresponding to the specific type of the given entity. Note that this
 		/// function does not handle \ref entities::field_entity, as their names are not needed when exporting.
-		[[nodiscard]] std::string get_entity_name_dynamic(const entity &ent) const {
+		[[nodiscard]] std::string get_entity_name_dynamic(const entity &ent) {
 			if (auto *user_type_ent = dyn_cast<entities::user_type_entity>(&ent)) {
 				return get_user_type_name_dynamic(*user_type_ent);
 			}

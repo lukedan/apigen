@@ -24,7 +24,7 @@ int main(int argc, char **argv) {
 	p.parse(reg);
 	dep_analyzer.analyze(reg);
 
-	basic_naming_convention naming;
+	basic_naming_convention naming(reg);
 	naming.api_struct_name = "api";
 	naming.api_struct_init_function_name = "init_api";
 

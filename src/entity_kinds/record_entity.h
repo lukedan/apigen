@@ -27,11 +27,25 @@ namespace apigen::entities {
 
 		/// Handles the \p apigen_recursive attribute.
 		bool handle_attribute(std::string_view anno) override {
+			if (anno == APIGEN_ANNOTATION_PRIVATE_EXPORT) {
+				_private_export = true;
+				return true;
+			}
 			if (anno == APIGEN_ANNOTATION_RECURSIVE) {
 				_recursive = true;
 				return true;
 			}
 			return entity::handle_attribute(anno);
+		}
+
+		/// Returns whether or not private members of this class can be exported.
+		[[nodiscard]] bool export_private_members() const {
+			// TODO private members that are explicitly marked as export will still be exported
+			return _private_export;
+		}
+		/// Returns whether or not this class has a viable move constructor.
+		[[nodiscard]] bool has_move_constructor() const {
+			return _move_constructor;
 		}
 
 		/// Returns the declaration of this entity.
@@ -44,6 +58,9 @@ namespace apigen::entities {
 		}
 	protected:
 		clang::CXXRecordDecl *_decl = nullptr; ///< The declaration of this entity.
-		bool _recursive = false; ///< Indicates whether members of this record should be exported.
+		bool
+			_move_constructor = false, ///< Indicates whether or not this class has a viable move constructor.
+			_recursive = false, ///< Indicates whether members of this record should be exported.
+			_private_export = false; ///< Whether or not to export private members.
 	};
 }

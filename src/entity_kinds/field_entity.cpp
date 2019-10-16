@@ -14,5 +14,13 @@ namespace apigen::entities {
 			queue.try_queue(*_type.type_entity);
 		}
 		queue.try_queue(*_parent);
+
+		if (_type.ref_kind != reference_kind::none) {
+			_field_kind = field_kind::reference_field;
+		} else if ((_type.qualifiers.front() & qualifier::const_qual) != qualifier::none) {
+			_field_kind = field_kind::const_field;
+		} else if (_decl->isMutable()) {
+			_field_kind = field_kind::mutable_field;
+		}
 	}
 }

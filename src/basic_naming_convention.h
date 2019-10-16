@@ -9,48 +9,75 @@ namespace apigen {
 	/// A basic naming convention that uses the given separator to separate scopes.
 	class basic_naming_convention : public naming_convention {
 	public:
+		/// Initializes \ref entities, and \ref printing_policy with the default \p clang::LangOptions.
+		explicit basic_naming_convention(entity_registry &reg) :
+			printing_policy(clang::LangOptions()), entities(&reg) {
+		}
+
 		/// Returns the function name.
-		[[nodiscard]] std::string get_function_name(const entities::function_entity &entity) const override {
-			return "$TODO";
+		[[nodiscard]] std::string get_function_name(const entities::function_entity &entity) override {
+			return std::string(_get_entity_name(entity.get_generic_declaration()));
 		}
 		/// Returns the method name.
-		[[nodiscard]] std::string get_method_name(const entities::method_entity &entity) const override {
-			return "$TODO";
+		[[nodiscard]] std::string get_method_name(const entities::method_entity &entity) override {
+			return std::string(_get_entity_name(entity.get_generic_declaration()));
 		}
 		/// Returns the constructor name.
-		[[nodiscard]] std::string get_constructor_name(const entities::constructor_entity &entity) const override {
-			return "$TODO";
+		[[nodiscard]] std::string get_constructor_name(const entities::constructor_entity &entity) override {
+			return
+				std::string(
+					_get_entity_name(llvm::cast<clang::NamedDecl>(entity.get_declaration()->getParent()))
+				) + std::string(scope_separator) + std::string(func_naming.constructor_name);
 		}
 
 		/// Returns the type name.
-		[[nodiscard]] std::string get_user_type_name(const entities::user_type_entity &entity) const override {
-			return "$TODO";
+		[[nodiscard]] std::string get_user_type_name(const entities::user_type_entity &entity) override {
+			return std::string(_get_entity_name(entity.get_generic_declaration()));
 		}
 
 		/// Returns the exported name of the destructor of the given \ref entities::record_entity.
-		[[nodiscard]] std::string get_record_destructor_api_name(
+		[[nodiscard]] std::string get_record_destructor_name(
 			const entities::record_entity &entity
-		) const override {
-			return "$TODO";
+		) override {
+			return
+				std::string(_get_entity_name(entity.get_declaration())) +
+				std::string(scope_separator) +
+				std::string(func_naming.destructor_name);
 		}
 
 		/// Returns the name of an enumerator in the enum declaration.
 		[[nodiscard]] std::string get_enumerator_name(
 			const entities::enum_entity &entity, clang::EnumConstantDecl *enumerator
-		) const override {
-			return "$TODO";
+		) override {
+			return
+				std::string(_get_entity_name(llvm::cast<clang::NamedDecl>(entity.get_declaration()))) +
+				std::string(scope_separator) +
+				enumerator->getName().str();
 		}
 
 		/// Returns the exported name of the non-const getter of the given field.
-		[[nodiscard]] std::string get_field_getter_name(const entities::field_entity &entity) const override {
-			return "$TODO";
+		[[nodiscard]] std::string get_field_getter_name(const entities::field_entity &entity) override {
+			// do not call _get_entity_name() on it directly since FieldDecl is not a DeclContext
+			return
+				std::string(_get_entity_name(entity.get_declaration()->getParent())) +
+				std::string(scope_separator) +
+				entity.get_declaration()->getName().str() +
+				std::string(scope_separator) +
+				std::string(func_naming.getter_name);
 		}
 		/// Returns the exportedname of the const getter of the given field.
-		[[nodiscard]] std::string get_field_const_getter_name(const entities::field_entity &entity) const override {
-			return "$TODO";
+		[[nodiscard]] std::string get_field_const_getter_name(const entities::field_entity &entity) override {
+			// do not call _get_entity_name() on it directly since FieldDecl is not a DeclContext
+			return
+				std::string(_get_entity_name(entity.get_declaration()->getParent())) +
+				std::string(scope_separator) +
+				entity.get_declaration()->getName().str() +
+				std::string(scope_separator) +
+				std::string(func_naming.const_getter_name);
 		}
 
 		special_function_naming func_naming; ///< Naming information of overloaded operators.
+		clang::PrintingPolicy printing_policy; ///< The printing policy used when generating type names.
 		std::string_view
 			scope_separator{"_"}, ///< Separator between scopes.
 			template_args_begin{"_"}, ///< Separates class names and template argument lists.
@@ -70,6 +97,15 @@ namespace apigen {
 			}
 			return user;
 		}
+		/// Appends short qualifiers to the given string.
+		inline static void _append_qualifiers(std::string &str, qualifier quals) {
+			if ((quals & qualifier::const_qual) != qualifier::none) {
+				str += "c";
+			}
+			if ((quals & qualifier::volatile_qual) != qualifier::none) {
+				str += "v";
+			}
+		}
 		/// Returns the name of a single template argument to be used when exporting.
 		[[nodiscard]] std::string _get_template_argument_spelling(const clang::TemplateArgument &arg) {
 			switch (arg.getKind()) {
@@ -78,7 +114,24 @@ namespace apigen {
 			case clang::TemplateArgument::Type:
 				{
 					auto type = qualified_type::from_clang_type(arg.getAsType(), nullptr);
-					// TODO
+					std::string result;
+					switch (type.ref_kind) {
+					case reference_kind::reference:
+						result += "r";
+						break;
+					case reference_kind::rvalue_reference:
+						result += "x";
+						break;
+					default:
+						break;
+					}
+					_append_qualifiers(result, type.qualifiers.front());
+					for (auto it = ++type.qualifiers.begin(); it != type.qualifiers.end(); ++it) {
+						result += "p";
+						_append_qualifiers(result, *it);
+					}
+					result += _get_type_name(type.type);
+					return result;
 				}
 		    // The template argument is a declaration that was provided for a pointer,
 		    // reference, or pointer to member non-type template parameter.
@@ -87,7 +140,26 @@ namespace apigen {
 			case clang::TemplateArgument::NullPtr:
 				return "nullptr";
 			case clang::TemplateArgument::Integral:
-				return arg.getAsIntegral().toString(10);
+				{
+					std::string result = arg.getAsIntegral().toString(10);
+					for (char &c : result) {
+						if (c < '0' || c > '9') {
+							switch (c) {
+							case '-':
+								c = 'n';
+								break;
+							case '.':
+								c = 'd';
+								break;
+							default:
+								std::cerr << "unknown character in APSInt: " << result << "\n";
+								c = '_';
+								break;
+							}
+						}
+					}
+					return result;
+				}
 		    // The template argument is a template name that was provided for a
 		    // template template parameter.
 			case clang::TemplateArgument::Template:
@@ -101,6 +173,7 @@ namespace apigen {
 			case clang::TemplateArgument::Pack:
 				return _get_template_argument_list_spelling(arg.getPackAsArray());
 			}
+			return "$UNSUPPORTED_TEMPLATE_ARG";
 		}
 		/// Returns the name of a template argument list to be used when exporting, without \ref template_args_begin
 		/// or \ref template_args_end.
@@ -157,9 +230,19 @@ namespace apigen {
 			}
 			return it->second;
 		}
+		/// Returns the exported name for the given \p clang::Type.
+		[[nodiscard]] std::string_view _get_type_name(const clang::Type *type) {
+			if (auto *builtin = llvm::dyn_cast<clang::BuiltinType>(type)) {
+				return to_string_view(builtin->getName(printing_policy));
+			}
+			if (auto *tag = llvm::dyn_cast<clang::TagType>(type)) {
+				return _get_entity_name(tag->getAsTagDecl());
+			}
+			return "$UNSUPPORTED_TYPE";
+		}
 		/// Returns the full name of the given entity, including all its parent scopes.
 		[[nodiscard]] std::string_view _get_entity_name(clang::NamedDecl *decl) {
-			decl = llvm::cast<clang::NamedDecl>(decl);
+			decl = llvm::cast<clang::NamedDecl>(decl->getCanonicalDecl());
 			auto it = _decl_names.lower_bound(decl);
 			if (it == _decl_names.end() || it->first != decl) {
 				std::string result;
@@ -176,14 +259,6 @@ namespace apigen {
 				it = _decl_names.emplace_hint(it, decl, std::move(result));
 			}
 			return it->second;
-		}
-
-		/// Returns the name of the given function.
-		[[nodiscard]] std::string_view _get_function_name(clang::FunctionDecl *decl) const {
-			if (decl->isOverloadedOperator()) {
-				return func_naming.get_operator_name(decl->getOverloadedOperator());
-			}
-			return to_string_view(decl->getName());
 		}
 	};
 }

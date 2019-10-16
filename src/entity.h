@@ -53,11 +53,19 @@ namespace apigen {
 		[[nodiscard]] bool is_marked_for_exporting() const {
 			return _export;
 		}
+		/// Returns whether this entity is excluded from exporting.
+		[[nodiscard]] bool is_excluded() const {
+			return _exclude;
+		}
 
 		/// Called to process the attribute specified for this entity.
 		virtual bool handle_attribute(std::string_view attr) {
 			if (attr == APIGEN_ANNOTATION_EXPORT) {
 				mark_for_exporting();
+				return true;
+			}
+			if (attr == APIGEN_ANNOTATION_EXCLUDE) {
+				_exclude = true;
 				return true;
 			}
 			if (TEMP_starts_with(APIGEN_ANNOTATION_RENAME_PREFIX, attr)) {
@@ -86,7 +94,9 @@ namespace apigen {
 		virtual void gather_dependencies(entity_registry&, dependency_analyzer&) = 0;
 	protected:
 		std::string _substitute_name; ///< The alternative name used when exporting this entity.
-		bool _export = false; ///< Whether this entity is exported.
+		bool
+			_export = false, ///< Whether this entity is exported.
+			_exclude = false; ///< Whether this entity is explicitly marked as excluded from exporting.
 	};
 
 	namespace _details {

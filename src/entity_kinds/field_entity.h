@@ -11,6 +11,14 @@
 #include "../types.h"
 
 namespace apigen::entities {
+	/// The special property of a field.
+	enum class field_kind : unsigned char {
+		normal_field, ///< A normal field.
+		reference_field, ///< This field is a reference.
+		const_field, ///< This field is not a reference, but is marked const.
+		mutable_field ///< This field is marked mutable.
+	};
+
 	/// An entity that represents a field.
 	class field_entity : public entity {
 	public:
@@ -36,6 +44,11 @@ namespace apigen::entities {
 			return _parent;
 		}
 
+		/// Returns the special property of this field.
+		[[nodiscard]] field_kind get_field_kind() const {
+			return _field_kind;
+		}
+
 		/// Returns the declaration of this entity.
 		[[nodiscard]] clang::FieldDecl *get_declaration() const {
 			return _decl;
@@ -52,6 +65,7 @@ namespace apigen::entities {
 	protected:
 		qualified_type _type; ///< The type of this field.
 		std::string _export_name; ///< The actual name used when exporting.
+		field_kind _field_kind = field_kind::normal_field; ///< The special property of this field.
 		record_entity *_parent = nullptr; ///< The parent type.
 		clang::FieldDecl *_decl = nullptr; ///< The declaration associated with this entity.
 	};

@@ -55,7 +55,7 @@ namespace apigen {
 		}
 
 		/// Returns the underlying \p clang::CompilerInstance.
-		const clang::CompilerInstance &get_compiler() const {
+		[[nodiscard]] const clang::CompilerInstance &get_compiler() const {
 			return _compiler;
 		}
 	protected:

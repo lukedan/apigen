@@ -22,11 +22,16 @@ namespace apigen::entities {
 		explicit constructor_entity(clang::CXXConstructorDecl *decl) : method_entity(decl) {
 		}
 
+		/// Constructors have no \p this pointers.
+		[[nodiscard]] std::optional<qualified_type> get_this_type(entity_registry&) const override {
+			return std::nullopt;
+		}
+	protected:
 		/// The API return type is the type of the created object.
 		void _collect_api_return_type(entity_registry &reg) override {
 			auto *decl = llvm::cast<clang::CXXConstructorDecl>(get_declaration());
 			_api_return_type.emplace(qualified_type::from_clang_type_pointer(
-				decl->getThisType().getCanonicalType().getTypePtr(), reg
+				decl->getThisType().getCanonicalType()->getPointeeType().getTypePtr(), reg
 			));
 		}
 	};
