@@ -20,59 +20,72 @@ namespace apigen {
 	/// Determines the names of exported entities.
 	class naming_convention {
 	public:
+		/// A name and another string that helps disambiguate the name.
+		struct name_info {
+			/// Default constructor.
+			name_info() = default;
+			/// Initializes all fields of this struct.
+			name_info(std::string n, std::string dis) : name(std::move(n)), disambiguation(std::move(dis)) {
+			}
+
+			std::string
+				name, ///< The short name.
+				disambiguation; ///< The string used to help disambiguate the name.
+		};
+
 		/// Default virtual destructor.
 		virtual ~naming_convention() = default;
 
 		// functions used to get the names of an entity
 		/// Returns the name of the given \ref entities::function_entity.
-		[[nodiscard]] virtual std::string get_function_name(const entities::function_entity&) = 0;
+		[[nodiscard]] virtual name_info get_function_name(const entities::function_entity&) = 0;
 		/// Returns the name of the given \ref entities::method_entity.
-		[[nodiscard]] virtual std::string get_method_name(const entities::method_entity&) = 0;
+		[[nodiscard]] virtual name_info get_method_name(const entities::method_entity&) = 0;
 		/// Returns the name of the given \ref entities::constructor_entity.
-		[[nodiscard]] virtual std::string get_constructor_name(const entities::constructor_entity&) = 0;
+		[[nodiscard]] virtual name_info get_constructor_name(const entities::constructor_entity&) = 0;
 
 		/// Returns the name of the given \ref entities::user_type_entity.
-		[[nodiscard]] virtual std::string get_user_type_name(const entities::user_type_entity&) = 0;
+		[[nodiscard]] virtual name_info get_user_type_name(const entities::user_type_entity&) = 0;
 		/// Returns the name of the given \ref entities::record_entity. By default this function returns the result of
 		/// \ref get_user_type_name().
-		[[nodiscard]] virtual std::string get_record_name(const entities::record_entity &ent) {
+		[[nodiscard]] virtual name_info get_record_name(const entities::record_entity &ent) {
 			return get_user_type_name(ent);
 		}
 		/// Returns the name of the given \ref entities::enum_entity. By default this function returns the result of
 		/// \ref get_user_type_name().
-		[[nodiscard]] virtual std::string get_enum_name(const entities::enum_entity &ent) {
+		[[nodiscard]] virtual name_info get_enum_name(const entities::enum_entity &ent) {
 			return get_user_type_name(ent);
 		}
 
 		// functions used to get names related to an entity
 		/// Returns the exported name of the destructor of the given \ref entities::record_entity.
-		[[nodiscard]] virtual std::string get_record_destructor_name(const entities::record_entity&) = 0;
+		[[nodiscard]] virtual name_info get_record_destructor_name(const entities::record_entity&) = 0;
 
 		/// Returns the name of an enumerator in the enum declaration.
-		[[nodiscard]] virtual std::string get_enumerator_name(
+		[[nodiscard]] virtual name_info get_enumerator_name(
 			const entities::enum_entity&, clang::EnumConstantDecl*
 		) = 0;
 
 		/// Returns the exported name of the non-const getter of the given field.
-		[[nodiscard]] virtual std::string get_field_getter_name(const entities::field_entity&) = 0;
+		[[nodiscard]] virtual name_info get_field_getter_name(const entities::field_entity&) = 0;
 		/// Returns the exportedname of the const getter of the given field.
-		[[nodiscard]] virtual std::string get_field_const_getter_name(const entities::field_entity&) = 0;
+		[[nodiscard]] virtual name_info get_field_const_getter_name(const entities::field_entity&) = 0;
 
 		// functions below are used to dispatch the call to the corresponding type
 		/// Dispatches the call to \ref get_enum_name() or \ref get_record_name() depending on the actual type of the
 		/// given \ref entities::uesr_type_entity.
-		[[nodiscard]] std::string get_user_type_name_dynamic(const entities::user_type_entity &ent) {
+		[[nodiscard]] name_info get_user_type_name_dynamic(const entities::user_type_entity &ent) {
 			if (auto *record_ent = dyn_cast<entities::record_entity>(&ent)) {
 				return get_record_name(*record_ent);
 			}
 			if (auto *enum_ent = dyn_cast<entities::enum_entity>(&ent)) {
 				return get_enum_name(*enum_ent);
 			}
-			return "$BADTYPE";
+			return name_info("$BADTYPE", "$BAD");
 		}
 		/// Dispatches the call to \ref get_function_name(), \ref get_method_name(), or \ref get_constructor_name()
 		/// depending on the actual type of the given \ref entities::uesr_type_entity.
-		[[nodiscard]] std::string get_function_name_dynamic(const entities::function_entity &ent) {
+		[[nodiscard]] name_info get_function_name_dynamic(const entities::function_entity &ent) {
 			if (auto *method_ent = dyn_cast<entities::method_entity>(&ent)) {
 				if (auto *constructor_ent = dyn_cast<entities::constructor_entity>(method_ent)) {
 					return get_constructor_name(*constructor_ent);
@@ -84,21 +97,25 @@ namespace apigen {
 
 		/// Dispatches the call to the one corresponding to the specific type of the given entity. Note that this
 		/// function does not handle \ref entities::field_entity, as their names are not needed when exporting.
-		[[nodiscard]] std::string get_entity_name_dynamic(const entity &ent) {
+		[[nodiscard]] name_info get_entity_name_dynamic(const entity &ent) {
 			if (auto *user_type_ent = dyn_cast<entities::user_type_entity>(&ent)) {
 				return get_user_type_name_dynamic(*user_type_ent);
 			}
 			if (auto *func_ent = dyn_cast<entities::function_entity>(&ent)) {
 				return get_function_name_dynamic(*func_ent);
 			}
-			return "$UNKNOWN_ENTITY_TYPE";
+			return name_info("$UNKNOWN_ENTITY_TYPE", "$UNKNOWN");
 		}
 
-		std::string
+		std::string_view
 			/// The name of the struct that holds all API function pointers.
 			api_struct_name,
 			/// The name of the function that initializes a given API struct.
-			api_struct_init_function_name;
+			api_struct_init_function_name,
+			/// The pattern of the name of struct sizes.
+			size_name_pattern = "{}_size",
+			/// The pattern of the name of struct alignments.
+			align_name_pattern = "{}_align";
 	};
 
 	/// Naming information of special functions such as constructors, destructors, and overloaded operators.

@@ -65,6 +65,7 @@ target_sources(apigen
 		src/entity.cpp
 		src/entity.h
 		src/entity_registry.h
+		src/exporter.cpp
 		src/exporter.h
 		src/main.cpp
 		src/misc.h

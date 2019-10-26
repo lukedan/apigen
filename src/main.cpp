@@ -43,6 +43,10 @@ int main(int argc, char **argv) {
 		std::ofstream out("host.cpp");
 		exp.export_host_cpp(out);
 	}
+	{
+		std::ofstream out("collect.cpp");
+		exp.export_data_collection_cpp(out);
+	}
 
 	return 0;
 }
