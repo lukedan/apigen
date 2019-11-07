@@ -25,7 +25,7 @@ namespace apigen {
 		[[nodiscard]] name_info get_method_name(const entities::method_entity &entity) override {
 			return name_info(
 				std::string(_get_entity_name(entity.get_generic_declaration())),
-				_get_function_parameter_list_spelling(entity.get_declaration()->parameters())
+				_get_method_disambiguation(entity)
 			);
 		}
 		/// Returns the constructor name.
@@ -102,7 +102,12 @@ namespace apigen {
 			params_begin{"_"}, ///< Separates the base name and the parameter type list.
 			params_end{""}, ///< Appended after parameter type lists.
 			param_separator{"_"}, ///< Separator between parameter types.
-			params_empty{"_void"}; ///< The spelling used when the parameter type list is empty.
+			params_empty{"_void"}, ///< The spelling used when the parameter type list is empty.
+
+			method_const_qual{"_const"}, ///< Const qualifier for methods.
+			method_volatile_qual{"_volatile"}, ///< Volatile qualifier for methods.
+			method_lvalue_ref{"_ref"}, ///< Lvalue reference methods.
+			method_rvalue_ref{"_rvalue_ref"}; ///< Rvalue reference methods.
 		entity_registry *entities = nullptr; ///< All registered entities.
 	protected:
 		/// Cached names of declarations, without its parent scopes.
@@ -289,6 +294,34 @@ namespace apigen {
 			return "$UNSUPPORTED_TYPE";
 		}
 
+		/// Returns the string used to disambiguate methods. More specifically, this function also includes
+		/// cv-qualifiers (and ref qualifiers) in the disambiguation string.
+		[[nodiscard]] std::string _get_method_disambiguation(const entities::function_entity &ent) {
+			auto *decl = llvm::cast<clang::CXXMethodDecl>(ent.get_declaration());
+			auto qty = qualified_type::from_clang_type(decl->getThisType(), nullptr);
+			std::string result;
+			// qualifiers
+			assert_true(qty.qualifiers.size() == 2);
+			if ((qty.qualifiers.back() & qualifier::const_qual) != qualifier::none) {
+				result += method_const_qual;
+			}
+			if ((qty.qualifiers.back() & qualifier::volatile_qual) != qualifier::none) {
+				result += method_volatile_qual;
+			}
+			// ref
+			switch (qty.ref_kind) {
+			case reference_kind::reference:
+				result += method_lvalue_ref;
+				break;
+			case reference_kind::rvalue_reference:
+				result += method_rvalue_ref;
+				break;
+			case reference_kind::none:
+				// nothing to add
+				break;
+			}
+			return result + _get_function_parameter_list_spelling(decl->parameters());
+		}
 		/// Returns the spelling of the types of the parameter list of a function, used for disambiguation purposes.
 		[[nodiscard]] std::string _get_function_parameter_list_spelling(
 			const llvm::ArrayRef<clang::ParmVarDecl*> &ps
