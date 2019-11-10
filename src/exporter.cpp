@@ -113,20 +113,20 @@ namespace apigen {
 				result += _get_internal_pointer_and_qualifiers(type.ref_kind, type.qualifiers);
 				return result;
 			}
-	    // The template argument is a declaration that was provided for a pointer,
-	    // reference, or pointer to member non-type template parameter.
+		// The template argument is a declaration that was provided for a pointer,
+		// reference, or pointer to member non-type template parameter.
 		case clang::TemplateArgument::Declaration:
 			break;
 		case clang::TemplateArgument::NullPtr:
 			return "nullptr";
 		case clang::TemplateArgument::Integral:
 			return arg.getAsIntegral().toString(10);
-	    // The template argument is a template name that was provided for a
-	    // template template parameter.
+		// The template argument is a template name that was provided for a
+		// template template parameter.
 		case clang::TemplateArgument::Template:
 			break;
-	    // The template argument is a pack expansion of a template name that was
-	    // provided for a template template parameter.
+		// The template argument is a pack expansion of a template name that was
+		// provided for a template template parameter.
 		case clang::TemplateArgument::TemplateExpansion:
 			break;
 		case clang::TemplateArgument::Expression:
@@ -154,15 +154,18 @@ namespace apigen {
 		return result;
 	}
 
+	std::string_view exporter::_get_internal_function_name(clang::FunctionDecl *decl) const {
+		clang::OverloadedOperatorKind op_kind = decl->getOverloadedOperator();
+		if (op_kind != clang::OO_None) {
+			return _get_internal_operator_name(op_kind);
+		}
+		return to_string_view(llvm::cast<clang::NamedDecl>(decl)->getName());
+	}
+
 	std::string exporter::_get_internal_entity_name(clang::DeclContext *decl) const {
 		std::string result;
 		if (auto *func_decl = llvm::dyn_cast<clang::FunctionDecl>(decl)) {
-			clang::OverloadedOperatorKind op_kind = func_decl->getOverloadedOperator();
-			if (op_kind == clang::OO_None) {
-				result = llvm::cast<clang::NamedDecl>(decl)->getName().str();
-			} else {
-				result = _get_internal_operator_name(op_kind);
-			}
+			result = std::string(_get_internal_function_name(func_decl));
 		} else {
 			if (auto *template_decl = llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(decl)) {
 				result =
@@ -380,7 +383,7 @@ namespace apigen {
 				writer, type, entity->get_field_kind(), false
 			);
 			writer
-				.write_fmt("(*{})({} *)", name.getter_api_name.get_cached(), parent_it->second.name.get_cached())
+				.write_fmt("(*{})({} *);", name.getter_api_name.get_cached(), parent_it->second.name.get_cached())
 				.new_line();
 		}
 
@@ -389,7 +392,7 @@ namespace apigen {
 			writer, type, entity->get_field_kind(), true
 		);
 		writer.write_fmt(
-			"(*{})({} const *)", name.const_getter_api_name.get_cached(), parent_it->second.name.get_cached()
+			"(*{})({} const *);", name.const_getter_api_name.get_cached(), parent_it->second.name.get_cached()
 		);
 	}
 
@@ -397,7 +400,7 @@ namespace apigen {
 	void exporter::_export_pass_parameter(
 		cpp_writer &writer, const qualified_type &type, std::string_view param
 	) const {
-		if (type.is_reference_or_pointer()) {
+		if (type.is_reference_or_pointer()) { // passing a reference
 			cpp_writer::scope_token scope;
 			if (type.ref_kind == reference_kind::rvalue_reference) {
 				writer.write_fmt(
@@ -413,7 +416,7 @@ namespace apigen {
 			writer.write_fmt("reinterpret_cast<{} ", _get_internal_type_name(type.type));
 			_export_api_pointers_and_qualifiers(writer, type.ref_kind, type.qualifiers);
 			writer.write_fmt(">({})", param);
-		} else {
+		} else { // passing an object
 			if (auto *complex_ty = dyn_cast<entities::record_entity>(type.type_entity)) {
 				cpp_writer::scope_token possible_move;
 				if (complex_ty->has_move_constructor()) {
@@ -426,7 +429,11 @@ namespace apigen {
 				}
 				writer.write_fmt("*>({})", param);
 			} else { // primitive types
-				writer.write(param); // pass directly
+				if (type.type->isEnumeralType()) { // cast enums
+					writer.write_fmt("static_cast<{}>({})", _get_internal_type_name(type.type), param);
+				} else { // pass directly
+					writer.write(param);
+				}
 			}
 		}
 	}
@@ -440,6 +447,7 @@ namespace apigen {
 		std::vector<name_allocator::token> param_tokens;
 		std::vector<std::string> parameters;
 
+		writer.write("inline static ");
 		if (auto &return_type = entity->get_api_return_type()) {
 			_export_api_return_type(writer, return_type.value());
 		}
@@ -471,8 +479,8 @@ namespace apigen {
 
 			// the actual function call
 			writer.new_line();
-			{ // the optional placement new scope
-				cpp_writer::scope_token scope1;
+			{ // the optional placement new or *_cast scope
+				cpp_writer::scope_token new_or_cast_scope;
 				if (complex_return) {
 					auto *return_type = entity->get_api_return_type().value().type;
 					writer.write_fmt(
@@ -481,11 +489,30 @@ namespace apigen {
 					// for constructors, this will be directly followed by the argument list
 					if (!isa<entities::constructor_entity>(*entity)) {
 						// otherwise the call to the actual function need to be surrounded by parentheses
-						scope1 = writer.begin_scope(cpp_writer::parentheses_scope);
+						new_or_cast_scope = writer.begin_scope(cpp_writer::parentheses_scope);
 					}
 				} else if (auto &return_type = entity->get_api_return_type()) { // simple return
 					if (!return_type->is_void()) {
 						writer.write("return ");
+						if (return_type->is_reference_or_pointer()) {
+							if (!return_type->type->isBuiltinType()) { // cast the pointer to the correct type
+								writer.write("reinterpret_cast<");
+								_export_api_return_type(writer, return_type.value());
+								writer.write(">");
+								new_or_cast_scope = writer.begin_scope(cpp_writer::parentheses_scope);
+							}
+							if (return_type->is_reference()) { // for references, pointers are returned
+								writer.write("&");
+							}
+						} else {
+							if (auto *enum_ent = dyn_cast<entities::enum_entity>(return_type->type_entity)) {
+								// static_cast the enum
+								auto it = _enum_names.find(enum_ent);
+								assert_true(it != _enum_names.end());
+								writer.write_fmt("static_cast<{}>", it->second.name.get_cached());
+								new_or_cast_scope = writer.begin_scope(cpp_writer::parentheses_scope);
+							}
+						}
 					}
 				}
 
@@ -510,9 +537,10 @@ namespace apigen {
 							++param_it;
 							++param_name_it;
 						}
-						writer.write(to_string_view(method_decl->getName()));
+						// here scope is unnecessary
+						writer.write(_get_internal_function_name(method_decl));
 					}
-				} else { // normal function, print function name
+				} else { // normal function, print function name with scope
 					writer.write(_get_internal_entity_name(entity->get_declaration()));
 				}
 				{ // parameters
@@ -545,11 +573,12 @@ namespace apigen {
 		auto &type = entity->get_type();
 		auto parent_it = _record_names.find(entity->get_parent());
 		assert_true(parent_it != _record_names.end());
+		std::string_view exported_type_name = _get_exported_type_name(type.type, type.type_entity);
 
 		if (entity->get_field_kind() == entities::field_kind::normal_field) { // non-const getter
 			name_allocator func_scope = name_allocator::from_parent_immutable(_impl_scope);
 			auto input = func_scope.allocate_function_parameter("object", "");
-			writer.write_fmt("{} ", _get_exported_type_name(type.type, type.type_entity));
+			writer.write_fmt("inline static {} ", exported_type_name);
 			_export_api_field_getter_return_type_pointers_and_qualifiers(
 				writer, type, entity->get_field_kind(), false
 			);
@@ -561,11 +590,24 @@ namespace apigen {
 				auto scope = writer.begin_scope(cpp_writer::braces_scope);
 				writer
 					.new_line()
-					.write_fmt(
-						"return &reinterpret_cast<{} *>({})->{};",
+					.write("return ");
+				{
+					cpp_writer::scope_token cast_scope;
+					if (!entity->get_type().type->isBuiltinType()) {
+						writer.write_fmt("reinterpret_cast<{} ", exported_type_name);
+						_export_api_field_getter_return_type_pointers_and_qualifiers(
+							writer, type, entity->get_field_kind(), false
+						);
+						writer.write(">");
+						cast_scope = writer.begin_scope(cpp_writer::parentheses_scope);
+					}
+					writer.write_fmt(
+						"&reinterpret_cast<{} *>({})->{}",
 						_get_internal_entity_name(entity->get_parent()->get_declaration()),
 						input->get_name(), to_string_view(entity->get_declaration()->getName())
 					);
+				}
+				writer.write(";");
 			}
 			writer.new_line();
 		}
@@ -573,7 +615,7 @@ namespace apigen {
 		{ // const getter
 			name_allocator func_scope = name_allocator::from_parent_immutable(_impl_scope);
 			auto input = func_scope.allocate_function_parameter("object", "");
-			writer.write_fmt("{} ", _get_exported_type_name(type.type, type.type_entity));
+			writer.write_fmt("inline static {} ", exported_type_name);
 			_export_api_field_getter_return_type_pointers_and_qualifiers(
 				writer, type, entity->get_field_kind(), true
 			);
@@ -585,11 +627,24 @@ namespace apigen {
 				auto scope = writer.begin_scope(cpp_writer::braces_scope);
 				writer
 					.new_line()
-					.write_fmt(
-						"return &reinterpret_cast<{} const *>({})->{};",
+					.write_fmt("return ");
+				{
+					cpp_writer::scope_token cast_scope;
+					if (!entity->get_type().type->isBuiltinType()) {
+						writer.write_fmt("reinterpret_cast<{} ", exported_type_name);
+						_export_api_field_getter_return_type_pointers_and_qualifiers(
+							writer, type, entity->get_field_kind(), true
+						);
+						writer.write(">");
+						cast_scope = writer.begin_scope(cpp_writer::parentheses_scope);
+					}
+					writer.write_fmt(
+						"&reinterpret_cast<{} const *>({})->{}",
 						_get_internal_entity_name(entity->get_parent()->get_declaration()),
 						input->get_name(), to_string_view(entity->get_declaration()->getName())
 					);
+				}
+				writer.write(";");
 			}
 		}
 	}
@@ -600,7 +655,7 @@ namespace apigen {
 		name_allocator alloc = name_allocator::from_parent_immutable(_impl_scope);
 		auto input = alloc.allocate_function_parameter("object", "");
 		writer.write_fmt(
-			"void {}({} *{}) ", name.destructor_impl_name.get_cached(), name.name.get_cached(), input->get_name()
+			"inline static void {}({} *{}) ", name.destructor_impl_name.get_cached(), name.name.get_cached(), input->get_name()
 		);
 		{
 			auto scope = writer.begin_scope(cpp_writer::braces_scope);
@@ -633,7 +688,7 @@ namespace apigen {
 
 		writer
 			.new_line()
-			.write("typedef struct ");
+			.write_fmt("typedef struct {} ", naming->api_struct_name);
 		{
 			auto scope = writer.begin_scope(cpp_writer::braces_scope);
 			for (auto &&[ent, name] : _function_names) {
@@ -668,6 +723,9 @@ namespace apigen {
 		writer.write_fmt("class {} ", APIGEN_API_CLASS_NAME_STR);
 		{
 			auto scope = writer.begin_scope(cpp_writer::braces_scope);
+			writer
+				.new_line()
+				.write("public:");
 			for (auto &&[ent, name] : _function_names) {
 				writer.new_line();
 				_export_function_impl(writer, ent, name);
@@ -699,7 +757,7 @@ namespace apigen {
 				result_var->get_name()
 			);
 			{
-				auto scope = writer.begin_scope(cpp_writer::parentheses_scope);
+				auto scope = writer.begin_scope(cpp_writer::braces_scope);
 				for (auto &&[func, name] : _function_names) {
 					writer
 						.new_line()

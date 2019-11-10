@@ -264,6 +264,8 @@ namespace apigen {
 		[[nodiscard]] std::string _get_template_argument_spelling(const clang::TemplateArgument&) const;
 		/// Returns the spelling of a whole template argument list, excluding angle brackets.
 		[[nodiscard]] std::string _get_template_argument_list_spelling(llvm::ArrayRef<clang::TemplateArgument>) const;
+		/// Returns the name of a function, without any scope information.
+		[[nodiscard]] std::string_view _get_internal_function_name(clang::FunctionDecl*) const;
 		/// Returns the internal name of a function or a type.
 		[[nodiscard]] std::string _get_internal_entity_name(clang::DeclContext*) const;
 		/// Handles \p clang::BuiltinType for \ref _get_internal_entity_name().

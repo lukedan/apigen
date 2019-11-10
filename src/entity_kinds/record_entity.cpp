@@ -7,13 +7,44 @@
 #include "../entity_registry.h"
 
 namespace apigen::entities {
+	bool record_entity::is_move_constructor(clang::CXXConstructorDecl *decl) {
+		// ensure that this constructor accepts one parameter
+		if (decl->parameters().empty()) {
+			return false;
+		}
+		for (auto it = decl->param_begin() + 1; it != decl->param_end(); ++it) {
+			if (!(*it)->hasDefaultArg()) {
+				return false;
+			}
+		}
+		// inspect the first parameter
+		clang::ParmVarDecl *param = decl->parameters()[0];
+		if (param->isParameterPack()) { // ignore packs, this may produce false negatives
+			return false;
+		}
+		auto qty = qualified_type::from_clang_type(param->getType(), nullptr);
+		if (
+			qty.ref_kind == reference_kind::rvalue_reference &&
+			qty.qualifiers.size() == 1 &&
+			qty.qualifiers.front() == qualifier::none
+			) {
+			if (qty.type == decl->getParent()->getTypeForDecl()) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	void record_entity::gather_dependencies(entity_registry &reg, dependency_analyzer &queue) {
 		auto *def_decl = _decl->getDefinition();
 		if (def_decl == nullptr) {
 			return;
 		}
-		if (def_decl->hasSimpleMoveConstructor()) {
-			_move_constructor = true;
+		for (clang::CXXConstructorDecl *decl : def_decl->ctors()) {
+			if (!decl->isDeleted() && is_move_constructor(decl)) {
+				_move_constructor = true;
+				break;
+			}
 		}
 		// here we iterate over all child entities so that entities in template classes that are not marked as
 		// recursive export can be discovered exported correctly
@@ -27,7 +58,7 @@ namespace apigen::entities {
 					if (
 						tk == clang::FunctionDecl::TK_FunctionTemplate ||
 						tk == clang::FunctionDecl::TK_DependentFunctionTemplateSpecialization
-					) { // template, do not export
+						) { // template, do not export
 						continue;
 					}
 				} else if (auto *record_decl = llvm::dyn_cast<clang::CXXRecordDecl>(named_decl)) {

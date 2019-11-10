@@ -56,6 +56,9 @@ namespace apigen::entities {
 		[[nodiscard]] clang::NamedDecl *get_generic_declaration() const override {
 			return _decl;
 		}
+
+		/// Checks if the given constructor is a move constructor.
+		[[nodiscard]] static bool is_move_constructor(clang::CXXConstructorDecl*);
 	protected:
 		clang::CXXRecordDecl *_decl = nullptr; ///< The declaration of this entity.
 		bool

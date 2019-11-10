@@ -73,6 +73,10 @@ namespace apigen {
 		/// Mapping between \p clang::NamedDecl and entities.
 		_decl_mapping_t _decl_mapping;
 
+		/// Returns the value indicating that entity creation is rejected.
+		[[nodiscard]] std::pair<_decl_mapping_t::iterator, bool> _reject_entity_creation() {
+			return {_decl_mapping.end(), false};
+		}
 		/// Tries to find the \ref entity that correspond to the given declaration, and if one is not found, creates
 		/// a entity associated with it. This function should only be used when first parsing the source code.
 		template <typename Decl> std::pair<_decl_mapping_t::iterator, bool> _find_or_create_parsing_entity_static(
@@ -99,7 +103,7 @@ namespace apigen {
 			}
 
 			if (bad) { // don't handle this decl
-				return {_decl_mapping.end(), false};
+				return _reject_entity_creation();
 			}
 
 			auto found = _decl_mapping.lower_bound(decl);
@@ -121,14 +125,10 @@ namespace apigen {
 				if (new_entity) {
 					return {_decl_mapping.emplace_hint(found, decl, std::move(new_entity)), true};
 				} else { // do not need to register this entity or handle this declaration
-					return {_decl_mapping.end(), false};
+					return _reject_entity_creation();
 				}
 			}
 			return {found, false};
-		}
-		/// Returns the value indicating that entity creation is rejected.
-		[[nodiscard]] std::pair<_decl_mapping_t::iterator, bool> _reject_entity_creation() {
-			return {_decl_mapping.end(), false};
 		}
 		/// Dynamic version of \ref _find_or_create_entity_static().
 		std::pair<_decl_mapping_t::iterator, bool> _find_or_create_entity_dynamic(clang::NamedDecl *non_canon_decl) {

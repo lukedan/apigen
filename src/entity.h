@@ -8,7 +8,7 @@
 #include <clang/AST/Decl.h>
 #include <clang/AST/Attr.h>
 
-#include "../apigen_definitions.h"
+#include "apigen_definitions.h"
 #include "misc.h"
 
 namespace apigen {
