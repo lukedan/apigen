@@ -298,29 +298,31 @@ namespace apigen {
 		/// cv-qualifiers (and ref qualifiers) in the disambiguation string.
 		[[nodiscard]] std::string _get_method_disambiguation(const entities::function_entity &ent) {
 			auto *decl = llvm::cast<clang::CXXMethodDecl>(ent.get_declaration());
-			auto qty = qualified_type::from_clang_type(decl->getThisType(), nullptr);
-			std::string result;
-			// qualifiers
-			assert_true(qty.qualifiers.size() == 2);
-			if ((qty.qualifiers.back() & qualifier::const_qual) != qualifier::none) {
-				result += method_const_qual;
+			std::string this_qualifiers;
+			if (!decl->isStatic()) {
+				auto qty = qualified_type::from_clang_type(decl->getThisType(), nullptr);
+				// qualifiers
+				assert_true(qty.qualifiers.size() == 2);
+				if ((qty.qualifiers.back() & qualifier::const_qual) != qualifier::none) {
+					this_qualifiers += method_const_qual;
+				}
+				if ((qty.qualifiers.back() & qualifier::volatile_qual) != qualifier::none) {
+					this_qualifiers += method_volatile_qual;
+				}
+				// ref
+				switch (qty.ref_kind) {
+				case reference_kind::reference:
+					this_qualifiers += method_lvalue_ref;
+					break;
+				case reference_kind::rvalue_reference:
+					this_qualifiers += method_rvalue_ref;
+					break;
+				case reference_kind::none:
+					// nothing to add
+					break;
+				}
 			}
-			if ((qty.qualifiers.back() & qualifier::volatile_qual) != qualifier::none) {
-				result += method_volatile_qual;
-			}
-			// ref
-			switch (qty.ref_kind) {
-			case reference_kind::reference:
-				result += method_lvalue_ref;
-				break;
-			case reference_kind::rvalue_reference:
-				result += method_rvalue_ref;
-				break;
-			case reference_kind::none:
-				// nothing to add
-				break;
-			}
-			return result + _get_function_parameter_list_spelling(decl->parameters());
+			return this_qualifiers + _get_function_parameter_list_spelling(decl->parameters());
 		}
 		/// Returns the spelling of the types of the parameter list of a function, used for disambiguation purposes.
 		[[nodiscard]] std::string _get_function_parameter_list_spelling(

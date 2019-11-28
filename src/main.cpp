@@ -13,6 +13,7 @@
 
 using namespace apigen;
 
+// file names
 DEFINE_string(api_header_file, "./api.h", "Path to the API header output.");
 DEFINE_string(host_header_file, "./host.h", "Path to the host header output.");
 DEFINE_string(host_source_file, "./host.cpp", "Path to the host source file output.");
@@ -27,6 +28,10 @@ DEFINE_string(
 	"#include's to be added, however it's almost certain that some need to be added."
 );
 
+// debugging
+DEFINE_string(redirect_stderr, "", "The redirected stderr file name.");
+
+// naming
 DEFINE_string(api_struct_name, "api", "Name of the API structure containing function pointers.");
 DEFINE_string(api_initializer_name, "init_api", "Name of the function used to initialize the API structure.");
 
@@ -58,7 +63,7 @@ int main(int argc, char **argv) {
 	llvm::ArrayRef<char*> args(argv, argc);
 	for (auto it = args.begin(); it != args.end(); ++it) {
 		if (std::strcmp(*it, "--") == 0) {
-			int new_argc = it - args.begin();
+			int new_argc = static_cast<int>(it - args.begin());
 			argv[new_argc] = "clang++";
 			char **new_argv = argv;
 			gflags::ParseCommandLineFlags(&new_argc, &new_argv, true);
@@ -68,6 +73,15 @@ int main(int argc, char **argv) {
 		// if this loop finishes without breaking, then there's no '--' in the arguments
 		// in which case all arguments will be passed to clang
 	}
+
+	// redirect stderr if necessary
+	std::ofstream stderr_redirect;
+	if (!FLAGS_redirect_stderr.empty()) {
+		stderr_redirect.rdbuf()->pubsetbuf(nullptr, 0); // disable buffering, must be done before opening the file
+		stderr_redirect.open(FLAGS_redirect_stderr, std::ios::out | std::ios::trunc);
+		std::cerr.rdbuf(stderr_redirect.rdbuf());
+	}
+
 	auto invocation = clang::createInvocationFromCommandLine(args);
 
 	invocation->getPreprocessorOpts().addMacroDef("APIGEN_ACTIVE");

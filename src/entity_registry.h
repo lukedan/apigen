@@ -82,6 +82,16 @@ namespace apigen {
 		template <typename Decl> std::pair<_decl_mapping_t::iterator, bool> _find_or_create_parsing_entity_static(
 			Decl *non_canon_decl
 		) {
+			if constexpr (!(
+				std::is_base_of_v<clang::FunctionDecl, Decl> ||
+				std::is_base_of_v<clang::CXXRecordDecl, Decl> ||
+				std::is_base_of_v<clang::FieldDecl, Decl> ||
+				std::is_base_of_v<clang::EnumDecl, Decl>
+				)) {
+				return _reject_entity_creation();
+			}
+			// it's possible for a clang::TypeAliasDecl to have a clang::TypedefDecl to be its canonical decl
+			// (not sure if vice versa), however these types have already been filtered out above
 			Decl *decl = llvm::cast<Decl>(non_canon_decl->getCanonicalDecl());
 			bool bad = false;
 
