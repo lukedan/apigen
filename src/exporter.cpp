@@ -4,204 +4,8 @@
 /// Implementation of actual exporting the entities.
 
 namespace apigen {
-	std::string_view exporter::_get_internal_operator_name(clang::OverloadedOperatorKind kind) {
-		switch (kind) {
-		case clang::OO_New:
-			return "operator new";
-		case clang::OO_Delete:
-			return "operator delete";
-		case clang::OO_Array_New:
-			return "operator new[]";
-		case clang::OO_Array_Delete:
-			return "operator delete[]";
-		case clang::OO_Plus:
-			return "operator+";
-		case clang::OO_Minus:
-			return "operator-";
-		case clang::OO_Star:
-			return "operator*";
-		case clang::OO_Slash:
-			return "operator/";
-		case clang::OO_Percent:
-			return "operator%";
-		case clang::OO_Caret:
-			return "operator^";
-		case clang::OO_Amp:
-			return "operator&";
-		case clang::OO_Pipe:
-			return "operator|";
-		case clang::OO_Tilde:
-			return "operator~";
-		case clang::OO_Exclaim:
-			return "operator!";
-		case clang::OO_Equal:
-			return "operator=";
-		case clang::OO_Less:
-			return "operator<";
-		case clang::OO_Greater:
-			return "operator>";
-		case clang::OO_PlusEqual:
-			return "operator+=";
-		case clang::OO_MinusEqual:
-			return "operator-=";
-		case clang::OO_StarEqual:
-			return "operator*=";
-		case clang::OO_SlashEqual:
-			return "operator/=";
-		case clang::OO_PercentEqual:
-			return "operator%=";
-		case clang::OO_CaretEqual:
-			return "operator^=";
-		case clang::OO_AmpEqual:
-			return "operator&=";
-		case clang::OO_PipeEqual:
-			return "operator|=";
-		case clang::OO_LessLess:
-			return "operator<<";
-		case clang::OO_GreaterGreater:
-			return "operator>>";
-		case clang::OO_LessLessEqual:
-			return "operator<<=";
-		case clang::OO_GreaterGreaterEqual:
-			return "operator>>=";
-		case clang::OO_EqualEqual:
-			return "operator==";
-		case clang::OO_ExclaimEqual:
-			return "operator!=";
-		case clang::OO_LessEqual:
-			return "operator<=";
-		case clang::OO_GreaterEqual:
-			return "operator>=";
-		case clang::OO_Spaceship:
-			return "operator<=>";
-		case clang::OO_AmpAmp:
-			return "operator&&";
-		case clang::OO_PipePipe:
-			return "operator||";
-		case clang::OO_PlusPlus:
-			return "operator++";
-		case clang::OO_MinusMinus:
-			return "operator--";
-		case clang::OO_Comma:
-			return "operator,";
-		case clang::OO_ArrowStar:
-			return "operator->*";
-		case clang::OO_Arrow:
-			return "operator->";
-		case clang::OO_Call:
-			return "operator()";
-		case clang::OO_Subscript:
-			return "operator[]";
-		case clang::OO_Coawait:
-			return "operator co_await";
-		default:
-			return "$BAD_OPERATOR";
-		}
-	}
-
-
 	// exporting of internal types
-	std::string exporter::_get_template_argument_spelling(const clang::TemplateArgument &arg) const {
-		switch (arg.getKind()) {
-		case clang::TemplateArgument::Null:
-			return "$ERROR_NULL";
-		case clang::TemplateArgument::Type:
-			{
-				// TODO this breaks for array types
-				auto type = qualified_type::from_clang_type(arg.getAsType(), nullptr);
-				std::string result = _get_internal_type_name(type.type) + " ";
-				result += _get_internal_pointer_and_qualifiers(type.ref_kind, type.qualifiers);
-				return result;
-			}
-		// The template argument is a declaration that was provided for a pointer,
-		// reference, or pointer to member non-type template parameter.
-		case clang::TemplateArgument::Declaration:
-			break;
-		case clang::TemplateArgument::NullPtr:
-			return "nullptr";
-		case clang::TemplateArgument::Integral:
-			return arg.getAsIntegral().toString(10);
-		// The template argument is a template name that was provided for a
-		// template template parameter.
-		case clang::TemplateArgument::Template:
-			break;
-		// The template argument is a pack expansion of a template name that was
-		// provided for a template template parameter.
-		case clang::TemplateArgument::TemplateExpansion:
-			break;
-		case clang::TemplateArgument::Expression:
-			return "$UNSUPPORTED_TEMPLATE_ARG";
-		case clang::TemplateArgument::Pack:
-			return _get_template_argument_list_spelling(arg.getPackAsArray());
-		}
-		return "$UNSUPPORTED_TEMPLATE_ARG";
-
-		/*std::string result;
-		llvm::raw_string_ostream stream(result);
-		arg.print(internal_printing_policy, stream);
-		stream.str();
-		return result;*/
-	}
-
-	std::string exporter::_get_template_argument_list_spelling(llvm::ArrayRef<clang::TemplateArgument> args) const {
-		std::string result;
-		for (auto &arg : args) {
-			if (!result.empty()) {
-				result += ", ";
-			}
-			result += _get_template_argument_spelling(arg);
-		}
-		return result;
-	}
-
-	std::string_view exporter::_get_internal_function_name(clang::FunctionDecl *decl) const {
-		clang::OverloadedOperatorKind op_kind = decl->getOverloadedOperator();
-		if (op_kind != clang::OO_None) {
-			return _get_internal_operator_name(op_kind);
-		}
-		return to_string_view(llvm::cast<clang::NamedDecl>(decl)->getName());
-	}
-
-	std::string exporter::_get_internal_entity_name(clang::DeclContext *decl) const {
-		std::string result;
-		if (auto *func_decl = llvm::dyn_cast<clang::FunctionDecl>(decl)) {
-			result = std::string(_get_internal_function_name(func_decl));
-		} else {
-			if (auto *template_decl = llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(decl)) {
-				result =
-					"<" + _get_template_argument_list_spelling(template_decl->getTemplateArgs().asArray()) + ">";
-			}
-			result = llvm::cast<clang::NamedDecl>(decl)->getName().str() + result;
-		}
-		result = "::" + result;
-
-		for (
-			clang::DeclContext *current = decl->getParent();
-			current && !current->isTranslationUnit();
-			current = current->getParent()
-		) {
-			if (auto *record_decl = llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(current)) {
-				result =
-					"<" + _get_template_argument_list_spelling(record_decl->getTemplateArgs().asArray()) +
-					">" + result;
-			}
-			auto *named_decl = llvm::cast<clang::NamedDecl>(current);
-			result = "::" + named_decl->getName().str() + result;
-		}
-		return result;
-	}
-
-	std::string exporter::_get_internal_type_name(const clang::Type *type) const {
-		if (auto *builtin = llvm::dyn_cast<clang::BuiltinType>(type)) {
-			return std::string(to_string_view(builtin->getName(internal_printing_policy)));
-		}
-		if (auto *tagty = llvm::dyn_cast<clang::TagType>(type)) {
-			return _get_internal_entity_name(tagty->getAsTagDecl());
-		}
-		return "$UNSUPPORTED";
-	}
-
-	void exporter::_write_internal_pointer_and_qualifiers(
+	void _write_internal_pointer_and_qualifiers( // TODO remove this
 		std::ostream &out, reference_kind ref, const std::vector<qualifier> &quals
 	) {
 		for (auto it = quals.rbegin(); it != --quals.rend(); ++it) {
@@ -220,20 +24,11 @@ namespace apigen {
 		}
 	}
 
-	std::string exporter::_get_internal_pointer_and_qualifiers(
-		reference_kind ref, const std::vector<qualifier> &quals
-	) {
-		std::stringstream ss;
-		_write_internal_pointer_and_qualifiers(ss, ref, quals);
-		return ss.str();
-	}
-
-
 	// exporting of api types
 	std::string_view exporter::_get_exported_type_name(const clang::Type *type, entity *entity) const {
 		if (auto *builtin = llvm::dyn_cast<clang::BuiltinType>(type)) {
 			// still use the policy for internal names so that the code compiles without problems
-			return to_string_view(builtin->getName(internal_printing_policy));
+			return to_string_view(builtin->getName(printer.policy));
 		} else if (llvm::isa<clang::EnumType>(type)) {
 			auto it = _enum_names.find(cast<entities::enum_entity>(entity));
 			assert_true(it != _enum_names.end());
@@ -402,35 +197,51 @@ namespace apigen {
 	) const {
 		if (type.is_reference_or_pointer()) { // passing a reference
 			cpp_writer::scope_token scope;
-			if (type.ref_kind == reference_kind::rvalue_reference) {
-				writer.write_fmt(
-					"static_cast<{} {}>",
-					_get_internal_type_name(type.type),
-					_get_internal_pointer_and_qualifiers(type.ref_kind, type.qualifiers)
-				);
+			if (type.ref_kind == reference_kind::rvalue_reference) { // cast to rvalue reference
+				writer.write_fmt("static_cast<{}>", printer.get_internal_qualified_type_name(type));
 				scope = writer.begin_scope(cpp_writer::parentheses_scope);
 			}
-			if (type.is_reference()) {
+			if (type.is_reference()) { // dereference if necessary
 				writer.write('*');
 			}
-			writer.write_fmt("reinterpret_cast<{} ", _get_internal_type_name(type.type));
-			_export_api_pointers_and_qualifiers(writer, type.ref_kind, type.qualifiers);
-			writer.write_fmt(">({})", param);
+			// cast to type
+			if (type.ref_kind != reference_kind::none) {
+				// for references, first cast to the corresponding pointer type
+				writer.write_fmt(
+					"reinterpret_cast<{}>({})",
+					printer.get_internal_qualified_type_name(
+						type.type, reference_kind::none, { qualifier::const_qual },
+						type.qualifiers.data(), type.qualifiers.size()
+					),
+					param
+				);
+			} else {
+				// pass pointers directly
+				writer.write_fmt(
+					"reinterpret_cast<{}>({})", printer.get_internal_qualified_type_name(type), param
+				);
+			}
 		} else { // passing an object
 			if (auto *complex_ty = dyn_cast<entities::record_entity>(type.type_entity)) {
 				cpp_writer::scope_token possible_move;
-				if (complex_ty->has_move_constructor()) {
+				std::string cast_type;
+				if (complex_ty->has_move_constructor()) { // move
 					writer.write("::std::move");
 					possible_move = writer.begin_scope(cpp_writer::parentheses_scope);
+					cast_type = printer.get_internal_qualified_type_name(
+						type.type, reference_kind::none, { qualifier::none, qualifier::none }
+					);
+				} else {
+					cast_type = printer.get_internal_qualified_type_name(
+						type.type, reference_kind::none, { qualifier::none, qualifier::const_qual }
+					);
 				}
-				writer.write_fmt("*reinterpret_cast<{} ", _get_internal_type_name(type.type));
-				if (!complex_ty->has_move_constructor()) {
-					writer.write("const ");
-				}
-				writer.write_fmt("*>({})", param);
+				writer.write_fmt("*reinterpret_cast<{}>({})", cast_type, param);
 			} else { // primitive types
 				if (type.type->isEnumeralType()) { // cast enums
-					writer.write_fmt("static_cast<{}>({})", _get_internal_type_name(type.type), param);
+					writer.write_fmt(
+						"static_cast<{}>({})", printer.get_internal_type_name(type.type), param
+					);
 				} else { // pass directly
 					writer.write(param);
 				}
@@ -484,7 +295,8 @@ namespace apigen {
 				if (complex_return) {
 					auto *return_type = entity->get_api_return_type().value().type;
 					writer.write_fmt(
-						"new ({}) {}", parameters.back(), _get_internal_type_name(return_type)
+						"new ({}) {}",
+						parameters.back(), printer.get_internal_type_name(return_type)
 					);
 					// for constructors, this will be directly followed by the argument list
 					if (!isa<entities::constructor_entity>(*entity)) {
@@ -524,13 +336,13 @@ namespace apigen {
 						auto *method_decl = llvm::cast<clang::CXXMethodDecl>(method_ent->get_declaration());
 						auto *decl = method_decl->getParent();
 						if (method_ent->is_static()) { // export static member function call
-							writer.write_fmt("{}::", _get_internal_entity_name(decl));
+							writer.write_fmt("{}::", printer.get_internal_entity_name(decl));
 						} else { // non-static, export member function call
 							assert_true(param_it->type.qualifiers.size() == 2);
 							assert_true(param_it->type.ref_kind == reference_kind::none);
 							writer.write_fmt(
 								"reinterpret_cast<{} {}*>({})->",
-								_get_internal_entity_name(decl),
+								printer.get_internal_entity_name(decl),
 								param_it->type.qualifiers.back(),
 								*param_name_it
 							);
@@ -538,10 +350,10 @@ namespace apigen {
 							++param_name_it;
 						}
 						// here scope is unnecessary
-						writer.write(_get_internal_function_name(method_decl));
+						writer.write(printer.get_internal_function_name(method_decl));
 					}
 				} else { // normal function, print function name with scope
-					writer.write(_get_internal_entity_name(entity->get_declaration()));
+					writer.write(printer.get_internal_entity_name(entity->get_declaration()));
 				}
 				{ // parameters
 					auto scope2 = writer.begin_scope(cpp_writer::parentheses_scope);
@@ -558,7 +370,7 @@ namespace apigen {
 			if (complex_return) {
 				auto it = _record_names.find(cast<entities::record_entity>(
 					entity->get_api_return_type().value().type_entity
-				));
+					));
 				assert_true(it != _record_names.end());
 				writer
 					.new_line()
@@ -603,7 +415,7 @@ namespace apigen {
 					}
 					writer.write_fmt(
 						"&reinterpret_cast<{} *>({})->{}",
-						_get_internal_entity_name(entity->get_parent()->get_declaration()),
+						printer.get_internal_entity_name(entity->get_parent()->get_declaration()),
 						input->get_name(), to_string_view(entity->get_declaration()->getName())
 					);
 				}
@@ -640,7 +452,7 @@ namespace apigen {
 					}
 					writer.write_fmt(
 						"&reinterpret_cast<{} const *>({})->{}",
-						_get_internal_entity_name(entity->get_parent()->get_declaration()),
+						printer.get_internal_entity_name(entity->get_parent()->get_declaration()),
 						input->get_name(), to_string_view(entity->get_declaration()->getName())
 					);
 				}
@@ -655,7 +467,8 @@ namespace apigen {
 		name_allocator alloc = name_allocator::from_parent_immutable(_impl_scope);
 		auto input = alloc.allocate_function_parameter("object", "");
 		writer.write_fmt(
-			"inline static void {}({} *{}) ", name.destructor_impl_name.get_cached(), name.name.get_cached(), input->get_name()
+			"inline static void {}({} *{}) ",
+			name.destructor_impl_name.get_cached(), name.name.get_cached(), input->get_name()
 		);
 		{
 			auto scope = writer.begin_scope(cpp_writer::braces_scope);
@@ -663,7 +476,7 @@ namespace apigen {
 				.new_line()
 				.write_fmt(
 					"reinterpret_cast<{} *>({})->~{}();",
-					_get_internal_entity_name(entity->get_declaration()),
+					printer.get_internal_entity_name(entity->get_declaration()),
 					input->get_name(), to_string_view(entity->get_declaration()->getName())
 				);
 		}
@@ -811,7 +624,7 @@ namespace apigen {
 		{
 			auto scope = writer.begin_scope(cpp_writer::braces_scope);
 			for (auto &&[rec, name] : _record_names) {
-				std::string internal_name = _get_internal_entity_name(rec->get_declaration());
+				std::string internal_name = printer.get_internal_entity_name(rec->get_declaration());
 				writer
 					.new_line()
 					.write_fmt(R"(std::cout << "{})", _size_alignment_type_decl)

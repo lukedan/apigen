@@ -33,7 +33,7 @@ DEFINE_string(redirect_stderr, "", "The redirected stderr file name.");
 
 // naming
 DEFINE_string(api_struct_name, "api", "Name of the API structure containing function pointers.");
-DEFINE_string(api_initializer_name, "init_api", "Name of the function used to initialize the API structure.");
+DEFINE_string(api_initializer_name, "api_init", "Name of the function used to initialize the API structure.");
 
 // TODO naming convention parameters
 

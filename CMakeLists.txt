@@ -71,6 +71,8 @@ target_sources(apigen
 		"${SOURCE_PATH}/entity_registry.h"
 		"${SOURCE_PATH}/exporter.cpp"
 		"${SOURCE_PATH}/exporter.h"
+		"${SOURCE_PATH}/internal_name_printer.cpp"
+		"${SOURCE_PATH}/internal_name_printer.h"
 		"${SOURCE_PATH}/main.cpp"
 		"${SOURCE_PATH}/misc.h"
 		"${SOURCE_PATH}/naming_convention.h"

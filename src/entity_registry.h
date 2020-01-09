@@ -93,25 +93,24 @@ namespace apigen {
 			// it's possible for a clang::TypeAliasDecl to have a clang::TypedefDecl to be its canonical decl
 			// (not sure if vice versa), however these types have already been filtered out above
 			Decl *decl = llvm::cast<Decl>(non_canon_decl->getCanonicalDecl());
+			
 			bool bad = false;
-
+			// check if this decl is valid
+			bad = bad || decl->isInvalidDecl();
 			// check if this is a dependent decl
 			if constexpr (std::is_base_of_v<clang::DeclContext, Decl>) { // covers functions, records, and enums
 				bad = bad || decl->isDependentContext();
 			} else if constexpr (std::is_same_v<clang::FieldDecl, Decl>) { // fields
 				bad = bad || decl->getParent()->isDependentContext();
 			}
-
 			// check if this is a local class
 			if constexpr (std::is_same_v<clang::CXXRecordDecl, Decl>) {
 				bad = bad || decl->isLocalClass();
 			}
-
 			// check if this function is deleted
 			if constexpr (std::is_base_of_v<clang::FunctionDecl, Decl>) {
 				bad = bad || decl->isDeleted();
 			}
-
 			if (bad) { // don't handle this decl
 				return _reject_entity_creation();
 			}
@@ -146,6 +145,9 @@ namespace apigen {
 			auto found = _decl_mapping.lower_bound(decl);
 			if (found == _decl_mapping.end() || found->first != decl) { // not found
 				std::unique_ptr<entity> new_entity;
+				if (decl->isInvalidDecl()) { // decl is invalid
+					return _reject_entity_creation();
+				}
 				if (auto *func_decl = llvm::dyn_cast<clang::FunctionDecl>(decl)) {
 					if (func_decl->isDeleted()) { // the function must not be deleted
 						return _reject_entity_creation();

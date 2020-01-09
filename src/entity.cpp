@@ -20,11 +20,11 @@ namespace apigen {
 
 		/// Returns the result of \ref is_entity_base_of_v<base, derived>.
 		[[nodiscard]] constexpr bool is_base_of(entity_kind base, entity_kind derived) const {
-			return _tbl[static_cast<size_t>(base)][static_cast<size_t>(derived)];
+			return _tbl[static_cast<std::size_t>(base)][static_cast<std::size_t>(derived)];
 		}
 	protected:
 		/// The number of entity classes.
-		constexpr static size_t _num_kinds = sizeof...(Types);
+		constexpr static std::size_t _num_kinds = sizeof...(Types);
 		using _row = std::array<bool, _num_kinds>; ///< A row of the base table.
 		using _table = std::array<_row, _num_kinds>; ///< Type of the base table.
 
@@ -32,7 +32,7 @@ namespace apigen {
 
 		/// Generates a single row of the base table.
 		template <typename Base> void _load_single() {
-			((_tbl[static_cast<size_t>(Base::kind)][static_cast<size_t>(Types::kind)] =
+			((_tbl[static_cast<std::size_t>(Base::kind)][static_cast<std::size_t>(Types::kind)] =
 				  {std::is_base_of_v<Base, Types>}), ...);
 		}
 		/// Generates the whole table.

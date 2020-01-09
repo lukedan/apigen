@@ -54,7 +54,7 @@ namespace apigen {
 				disambiguation_postfix; ///< The postfix that is used for disambiguation.
 			/// The numbering appended to this name when there're still conflicts after appending the postfix to this
 			/// name. If this is zero, there's no numbering for this entity.
-			size_t numbering = 0;
+			std::size_t numbering = 0;
 			bool postfix_used = false; ///< Whether \ref disambiguation_postfix is used in this name.
 		};
 		using token = std::unique_ptr<name_info>; ///< The token returned to the caller.
@@ -293,7 +293,7 @@ namespace apigen {
 				++_indent;
 				_scopes.back().has_newline = true;
 			}
-			for (size_t i = 0; i < _indent; ++i) {
+			for (std::size_t i = 0; i < _indent; ++i) {
 				write("\t");
 			}
 			return *this;
@@ -345,6 +345,6 @@ namespace apigen {
 		std::vector<_scope_rec> _scopes; ///< All current scopes.
 		std::string_view _separator; ///< The pending separator.
 		std::ostream &_out; ///< The output.
-		size_t _indent = 0; ///< The level of indentation.
+		std::size_t _indent = 0; ///< The level of indentation.
 	};
 }

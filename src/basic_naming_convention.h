@@ -93,21 +93,23 @@ namespace apigen {
 		special_function_naming func_naming; ///< Naming information of overloaded operators.
 		clang::PrintingPolicy printing_policy; ///< The printing policy used when generating type names.
 		std::string_view
-			scope_separator{"_"}, ///< Separator between scopes.
+			scope_separator{ "_" }, ///< Separator between scopes.
 
-			template_args_begin{"_"}, ///< Separates class names and template argument lists.
-			template_args_end{""}, ///< Appended after template argument lists.
-			template_arg_separator{"_"}, ///< Separator between template arguments.
+			template_args_begin{ "_" }, ///< Separates class names and template argument lists.
+			template_args_end{ "" }, ///< Appended after template argument lists.
+			template_arg_separator{ "_" }, ///< Separator between template arguments.
 
-			params_begin{"_"}, ///< Separates the base name and the parameter type list.
-			params_end{""}, ///< Appended after parameter type lists.
-			param_separator{"_"}, ///< Separator between parameter types.
-			params_empty{"_void"}, ///< The spelling used when the parameter type list is empty.
+			params_begin{ "_" }, ///< Separates the base name and the parameter type list.
+			params_end{ "" }, ///< Appended after parameter type lists.
+			param_separator{ "_" }, ///< Separator between parameter types.
+			params_empty{ "_void" }, ///< The spelling used when the parameter type list is empty.
 
-			method_const_qual{"_const"}, ///< Const qualifier for methods.
-			method_volatile_qual{"_volatile"}, ///< Volatile qualifier for methods.
-			method_lvalue_ref{"_ref"}, ///< Lvalue reference methods.
-			method_rvalue_ref{"_rvalue_ref"}; ///< Rvalue reference methods.
+			method_const_qual{ "_const" }, ///< Const qualifier for methods.
+			method_volatile_qual{ "_volatile" }, ///< Volatile qualifier for methods.
+			method_lvalue_ref{ "_ref" }, ///< Lvalue reference methods.
+			method_rvalue_ref{ "_rvalue_ref" }, ///< Rvalue reference methods.
+
+			function_type_begin{ "func_" }; ///< Prefix of function types.
 		entity_registry *entities = nullptr; ///< All registered entities.
 	protected:
 		/// Cached names of declarations, without its parent scopes.
@@ -152,21 +154,21 @@ namespace apigen {
 			}
 			return user;
 		}
+		/// Returns the spelling of the given \ref qualified_type.
+		[[nodiscard]] std::string _get_qualified_type_spelling(const qualified_type &type) {
+			std::string result;
+			_append_qualifiers_and_pointers(result, type.ref_kind, type.qualifiers);
+			return result + _get_type_name(type.type);
+		}
 		/// Returns the name of a single template argument to be used when exporting.
 		[[nodiscard]] std::string _get_template_argument_spelling(const clang::TemplateArgument &arg) {
 			switch (arg.getKind()) {
 			case clang::TemplateArgument::Null:
 				return "$ERROR_NULL";
 			case clang::TemplateArgument::Type:
-				{
-					auto type = qualified_type::from_clang_type(arg.getAsType(), nullptr);
-					std::string result;
-					_append_qualifiers_and_pointers(result, type.ref_kind, type.qualifiers);
-					result += _get_type_name(type.type);
-					return result;
-				}
-		    // The template argument is a declaration that was provided for a pointer,
-		    // reference, or pointer to member non-type template parameter.
+				return _get_qualified_type_spelling(qualified_type::from_clang_type(arg.getAsType(), nullptr));
+			// The template argument is a declaration that was provided for a pointer,
+			// reference, or pointer to member non-type template parameter.
 			case clang::TemplateArgument::Declaration:
 				break;
 			case clang::TemplateArgument::NullPtr:
@@ -192,12 +194,12 @@ namespace apigen {
 					}
 					return result;
 				}
-		    // The template argument is a template name that was provided for a
-		    // template template parameter.
+			// The template argument is a template name that was provided for a
+			// template template parameter.
 			case clang::TemplateArgument::Template:
 				break;
-		    // The template argument is a pack expansion of a template name that was
-		    // provided for a template template parameter.
+			// The template argument is a pack expansion of a template name that was
+			// provided for a template template parameter.
 			case clang::TemplateArgument::TemplateExpansion:
 				break;
 			case clang::TemplateArgument::Expression:
@@ -229,15 +231,15 @@ namespace apigen {
 				if (auto *tag_decl = llvm::dyn_cast<clang::TagDecl>(decl)) {
 					base_name = _get_export_name<entities::user_type_entity>(
 						entities->find_or_register_parsed_entity(tag_decl)
-					);
+						);
 				} else if (auto *field_decl = llvm::dyn_cast<clang::FieldDecl>(decl)) {
 					base_name = _get_export_name<entities::field_entity>(
 						entities->find_or_register_parsed_entity(field_decl)
-					);
+						);
 				} else if (auto *function_decl = llvm::dyn_cast<clang::FunctionDecl>(decl)) {
 					auto *ent = cast<entities::function_entity>(
 						entities->find_or_register_parsed_entity(function_decl)
-					);
+						);
 					base_name = ent->get_substitute_name();
 					if (base_name.empty()) { // no user-defined name
 						if (function_decl->isOverloadedOperator()) { // operator
@@ -273,7 +275,7 @@ namespace apigen {
 					auto *context = llvm::cast<clang::DeclContext>(decl);
 					context && !context->isTranslationUnit();
 					context = context->getParent()
-				) {
+					) {
 					if (!result.empty()) {
 						result = std::string(scope_separator) + result;
 					}
@@ -284,12 +286,35 @@ namespace apigen {
 			return it->second;
 		}
 		/// Returns the exported name for the given \p clang::Type.
-		[[nodiscard]] std::string_view _get_type_name(const clang::Type *type) {
+		[[nodiscard]] std::string _get_type_name(const clang::Type *type) {
 			if (auto *builtin = llvm::dyn_cast<clang::BuiltinType>(type)) {
-				return to_string_view(builtin->getName(printing_policy));
+				return builtin->getName(printing_policy);
 			}
 			if (auto *tag = llvm::dyn_cast<clang::TagType>(type)) {
-				return _get_entity_name(tag->getAsTagDecl());
+				return std::string(_get_entity_name(tag->getAsTagDecl()));
+			}
+			if (auto *functy = llvm::dyn_cast<clang::FunctionProtoType>(type)) {
+				std::stringstream ss;
+				ss <<
+					function_type_begin <<
+					_get_qualified_type_spelling(
+						qualified_type::from_clang_type(functy->getReturnType(), nullptr)
+					);
+				if (functy->getParamTypes().empty()) {
+					ss << params_empty;
+				} else {
+					ss << params_begin;
+					bool first = true;
+					for (const clang::QualType &qty : functy->param_types()) {
+						if (first) {
+							first = false;
+						} else {
+							ss << param_separator;
+						}
+						ss << _get_qualified_type_spelling(qualified_type::from_clang_type(qty, nullptr));
+					}
+				}
+				return ss.str();
 			}
 			return "$UNSUPPORTED_TYPE";
 		}

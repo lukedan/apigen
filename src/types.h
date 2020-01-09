@@ -74,8 +74,9 @@ namespace apigen {
 		/// Constructs a \ref qualified_type from the given \ref entities::user_type_entity.
 		[[nodiscard]] static qualified_type from_clang_type_pointer(const clang::Type*, entity_registry&);
 
-		/// The list of qualifiers for this type. For non-pointer types, this vector should have only one element. For
-		/// each pointer level this vector should have one more element which denote that pointer level's qualifiers.
+		/// The list of qualifiers for this type. For non-pointer types, this vector should have only one element.
+		/// For each pointer level this vector should have one more element indicating that pointer level's
+		/// qualifiers. The qualifiers in the front are those of the outer layers.
 		std::vector<qualifier> qualifiers;
 		reference_kind ref_kind = reference_kind::none; /// Indicates what kind of reference this type is (if any).
 		const clang::Type *type = nullptr; ///< The underlying type.

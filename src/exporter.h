@@ -15,6 +15,7 @@
 #include "entity_registry.h"
 #include "cpp_writer.h"
 #include "naming_convention.h"
+#include "internal_name_printer.h"
 #include "parser.h"
 
 namespace apigen {
@@ -148,7 +149,7 @@ namespace apigen {
 
 		/// Initializes \ref internal_printing_policy.
 		explicit exporter(clang::PrintingPolicy policy) :
-			internal_printing_policy(std::move(policy)), _impl_scope(name_allocator::from_parent(_global_scope)) {
+			printer(std::move(policy)), _impl_scope(name_allocator::from_parent(_global_scope)) {
 		}
 		/// Initializes \ref internal_printing_policy and \ref naming.
 		exporter(clang::PrintingPolicy policy, naming_convention &conv) : exporter(std::move(policy)) {
@@ -241,7 +242,7 @@ namespace apigen {
 		/// manually add <cc>#include</cc> directives to the fromt of the output file.
 		void export_data_collection_cpp(std::ostream&) const;
 
-		clang::PrintingPolicy internal_printing_policy; ///< The \p clang::PrintingPolicy of internal classes.
+		internal_name_printer printer; ///< Printer of internal entities and types.
 		naming_convention *naming = nullptr; ///< The naming convention of exported types and functions.
 	protected:
 		/// Mapping between functions and their exported names.
@@ -255,30 +256,6 @@ namespace apigen {
 		name_allocator
 			_global_scope, ///< The \ref name_allocator for the global scope.
 			_impl_scope; ///< The \ref name_allocator for the scope that contain API implementations.
-
-		/// Returns the internal name of an operator name.
-		[[nodiscard]] static std::string_view _get_internal_operator_name(clang::OverloadedOperatorKind);
-
-		// exporting of internal types
-		/// Returns the spelling of the given \p clang::TemplateArgument.
-		[[nodiscard]] std::string _get_template_argument_spelling(const clang::TemplateArgument&) const;
-		/// Returns the spelling of a whole template argument list, excluding angle brackets.
-		[[nodiscard]] std::string _get_template_argument_list_spelling(llvm::ArrayRef<clang::TemplateArgument>) const;
-		/// Returns the name of a function, without any scope information.
-		[[nodiscard]] std::string_view _get_internal_function_name(clang::FunctionDecl*) const;
-		/// Returns the internal name of a function or a type.
-		[[nodiscard]] std::string _get_internal_entity_name(clang::DeclContext*) const;
-		/// Handles \p clang::BuiltinType for \ref _get_internal_entity_name().
-		[[nodiscard]] std::string _get_internal_type_name(const clang::Type*) const;
-
-		/// Writes asterisks, amperesands, and qualifiers for an internal type to the given stream.
-		static void _write_internal_pointer_and_qualifiers(
-			std::ostream&, reference_kind, const std::vector<qualifier>&
-		);
-		/// Wrapper around \ref _write_internal_pointer_and_qualifiers() that returns the result as a string.
-		[[nodiscard]] static std::string _get_internal_pointer_and_qualifiers(
-			reference_kind, const std::vector<qualifier>&
-		);
 
 		// exporting of external types
 		/// Returns the name of a type used in the API header.

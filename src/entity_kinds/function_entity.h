@@ -83,7 +83,7 @@ namespace apigen::entities {
 
 		/// Populates \ref _parameters with the set of parameters the exported function should have.
 		virtual void _build_parameter_list(entity_registry &reg) {
-			size_t pos = 0;
+			std::size_t pos = 0;
 			for (auto &param : _decl->parameters()) { // gather parameter types
 				_parameters.emplace_back(qualified_type::from_clang_type(param->getType(), &reg));
 				for (clang::FunctionDecl *redecl : _decl->redecls()) { // gather parameter name
