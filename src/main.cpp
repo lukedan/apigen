@@ -114,7 +114,7 @@ int main(int argc, char **argv) {
 	naming.api_struct_init_function_name = FLAGS_api_initializer_name;
 
 	// export!
-	exporter exp(p.get_compiler().getASTContext().getPrintingPolicy(), naming);
+	exporter exp(p.get_compiler().getASTContext().getPrintingPolicy(), naming, reg);
 	exp.collect_exported_entities(reg);
 	{
 		std::ofstream out(api_header);

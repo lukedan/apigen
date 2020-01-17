@@ -75,6 +75,7 @@ target_sources(apigen
 		"${SOURCE_PATH}/internal_name_printer.h"
 		"${SOURCE_PATH}/main.cpp"
 		"${SOURCE_PATH}/misc.h"
+		"${SOURCE_PATH}/naming_convention.cpp"
 		"${SOURCE_PATH}/naming_convention.h"
 		"${SOURCE_PATH}/parser.h"
 		"${SOURCE_PATH}/types.cpp"

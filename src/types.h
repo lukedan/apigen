@@ -1,7 +1,7 @@
 #pragma once
 
 /// \file
-/// Contains information about
+/// Structs used to store information about qualified types.
 
 #include <clang/AST/ASTContext.h>
 
@@ -67,6 +67,10 @@ namespace apigen {
 		/// Returns \p true if this type is \p void.
 		[[nodiscard]] bool is_void() const {
 			return !is_reference_or_pointer() && type->isVoidType();
+		}
+		/// Returns \p true if this type is a record type (i.e., not a pointer, reference, enum, or builtin type).
+		[[nodiscard]] bool is_record_type() const {
+			return !is_reference_or_pointer() && llvm::isa<clang::RecordType>(type);
 		}
 
 		/// Constructs a \ref qualified_type from the given \p clang::QualType.

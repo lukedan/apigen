@@ -59,10 +59,26 @@ namespace apigen {
 			}
 			return nullptr;
 		}
+		/// Registers the given \ref custom_function_entity.
+		custom_function_entity &register_custom_function(std::unique_ptr<custom_function_entity> entity) {
+			return *_custom_funcs.emplace_back(std::move(entity));
+		}
+		/// Adds the given entry to \ref _custom_host_deps.
+		void register_custom_host_dependency(std::string_view dep) {
+			_custom_host_deps.emplace(dep);
+		}
 
 		/// Returns the list of all entities.
 		[[nodiscard]] const std::map<clang::NamedDecl*, std::unique_ptr<entity>> &get_entities() const {
 			return _decl_mapping;
+		}
+		/// Returns all registered custom function entities.
+		[[nodiscard]] const std::vector<std::unique_ptr<custom_function_entity>> &get_custom_functions() const {
+			return _custom_funcs;
+		}
+		/// Returns custom host-side dependencies.
+		[[nodiscard]] const std::set<std::string> &get_custom_host_dependencies() const {
+			return _custom_host_deps;
 		}
 
 		dependency_analyzer *analyzer = nullptr; ///< The associated \ref dependency_analyzer.
@@ -72,6 +88,9 @@ namespace apigen {
 
 		/// Mapping between \p clang::NamedDecl and entities.
 		_decl_mapping_t _decl_mapping;
+		/// The list of custom function entities.
+		std::vector<std::unique_ptr<custom_function_entity>> _custom_funcs;
+		std::set<std::string> _custom_host_deps; ///< Custom host-side dependencies.
 
 		/// Returns the value indicating that entity creation is rejected.
 		[[nodiscard]] std::pair<_decl_mapping_t::iterator, bool> _reject_entity_creation() {

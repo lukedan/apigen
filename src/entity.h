@@ -10,10 +10,13 @@
 
 #include "apigen_definitions.h"
 #include "misc.h"
+#include "naming_convention.h"
 
 namespace apigen {
-	class entity_registry;
+	class cpp_writer;
 	class dependency_analyzer;
+	class entity_registry;
+	class exporter;
 
 	/// Specifies the kind of an entity through \ref entity::get_kind(). This exists since RTTI is disabled for clang.
 	enum class entity_kind {
@@ -21,7 +24,6 @@ namespace apigen {
 		user_type, ///< A user-defined type.
 		enumeration, ///< An enum.
 		record, ///< A struct or class, possibly a template specialization.
-		/*template_specialization, ///< A template specialization, either explicit or implicit.*/
 		field, ///< A field of a record.
 		function, ///< A function, possibly a method.
 		method, ///< A method.
@@ -154,4 +156,20 @@ namespace apigen {
 		static_assert(std::is_base_of_v<entity, T>, "the target type must be derived from entity");
 		return is_entity_base_of(T::kind, ent.get_kind());
 	}
+
+
+	/// A custom function not associated with a \p clang::Decl. This will always be exported. This class is not
+	/// related to \ref entities::function_entity.
+	class custom_function_entity {
+	public:
+		/// Default virtual destructor.
+		virtual ~custom_function_entity() = default;
+
+		/// Returns the suggested name of this function.
+		virtual naming_convention::name_info get_suggested_name(naming_convention&) const = 0;
+		/// Exports the declaration of the function pointer of this function.
+		virtual void export_pointer_declaration(cpp_writer&, const exporter&, std::string_view) const = 0;
+		/// Exports the definition of this function.
+		virtual void export_definition(cpp_writer&, const exporter&, std::string_view) const = 0;
+	};
 }

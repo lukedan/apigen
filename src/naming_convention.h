@@ -6,17 +6,20 @@
 #include <string>
 #include <map>
 
-#include "entity.h"
-#include "entity_kinds/constructor_entity.h"
-#include "entity_kinds/enum_entity.h"
-#include "entity_kinds/field_entity.h"
-#include "entity_kinds/function_entity.h"
-#include "entity_kinds/method_entity.h"
-#include "entity_kinds/record_entity.h"
-#include "entity_kinds/user_type_entity.h"
-#include "entity_registry.h"
+#include <clang/AST/Decl.h>
 
 namespace apigen {
+	class entity;
+	namespace entities {
+		class constructor_entity;
+		class enum_entity;
+		class field_entity;
+		class function_entity;
+		class method_entity;
+		class record_entity;
+		class user_type_entity;
+	}
+
 	/// Determines the names of exported entities.
 	class naming_convention {
 	public:
@@ -48,14 +51,10 @@ namespace apigen {
 		[[nodiscard]] virtual name_info get_user_type_name(const entities::user_type_entity&) = 0;
 		/// Returns the name of the given \ref entities::record_entity. By default this function returns the result of
 		/// \ref get_user_type_name().
-		[[nodiscard]] virtual name_info get_record_name(const entities::record_entity &ent) {
-			return get_user_type_name(ent);
-		}
+		[[nodiscard]] virtual name_info get_record_name(const entities::record_entity&);
 		/// Returns the name of the given \ref entities::enum_entity. By default this function returns the result of
 		/// \ref get_user_type_name().
-		[[nodiscard]] virtual name_info get_enum_name(const entities::enum_entity &ent) {
-			return get_user_type_name(ent);
-		}
+		[[nodiscard]] virtual name_info get_enum_name(const entities::enum_entity&);
 
 		// functions used to get names related to an entity
 		/// Returns the exported name of the destructor of the given \ref entities::record_entity.
@@ -74,38 +73,14 @@ namespace apigen {
 		// functions below are used to dispatch the call to the corresponding type
 		/// Dispatches the call to \ref get_enum_name() or \ref get_record_name() depending on the actual type of the
 		/// given \ref entities::uesr_type_entity.
-		[[nodiscard]] name_info get_user_type_name_dynamic(const entities::user_type_entity &ent) {
-			if (auto *record_ent = dyn_cast<entities::record_entity>(&ent)) {
-				return get_record_name(*record_ent);
-			}
-			if (auto *enum_ent = dyn_cast<entities::enum_entity>(&ent)) {
-				return get_enum_name(*enum_ent);
-			}
-			return name_info("$BADTYPE", "$BAD");
-		}
+		[[nodiscard]] name_info get_user_type_name_dynamic(const entities::user_type_entity&);
 		/// Dispatches the call to \ref get_function_name(), \ref get_method_name(), or \ref get_constructor_name()
 		/// depending on the actual type of the given \ref entities::uesr_type_entity.
-		[[nodiscard]] name_info get_function_name_dynamic(const entities::function_entity &ent) {
-			if (auto *method_ent = dyn_cast<entities::method_entity>(&ent)) {
-				if (auto *constructor_ent = dyn_cast<entities::constructor_entity>(method_ent)) {
-					return get_constructor_name(*constructor_ent);
-				}
-				return get_method_name(*method_ent);
-			}
-			return get_function_name(ent);
-		}
+		[[nodiscard]] name_info get_function_name_dynamic(const entities::function_entity&);
 
 		/// Dispatches the call to the one corresponding to the specific type of the given entity. Note that this
 		/// function does not handle \ref entities::field_entity, as their names are not needed when exporting.
-		[[nodiscard]] name_info get_entity_name_dynamic(const entity &ent) {
-			if (auto *user_type_ent = dyn_cast<entities::user_type_entity>(&ent)) {
-				return get_user_type_name_dynamic(*user_type_ent);
-			}
-			if (auto *func_ent = dyn_cast<entities::function_entity>(&ent)) {
-				return get_function_name_dynamic(*func_ent);
-			}
-			return name_info("$UNKNOWN_ENTITY_TYPE", "$UNKNOWN");
-		}
+		[[nodiscard]] name_info get_entity_name_dynamic(const entity&);
 
 		std::string_view
 			/// The name of the struct that holds all API function pointers.
@@ -121,56 +96,56 @@ namespace apigen {
 	/// Naming information of special functions such as constructors, destructors, and overloaded operators.
 	struct special_function_naming {
 		std::string_view
-			constructor_name{"ctor"}, ///< The name of constructors.
-			destructor_name{"dtor"}, ///< The name of destructors.
+			constructor_name{ "ctor" }, ///< The name of constructors.
+			destructor_name{ "dtor" }, ///< The name of destructors.
 
-			getter_name{"getter"}, ///< The name of field getters.
-			const_getter_name{"const_getter"}, ///< The name of const getters.
+			getter_name{ "getter" }, ///< The name of field getters.
+			const_getter_name{ "const_getter" }, ///< The name of const getters.
 
-			new_name{"new"}, ///< The name of <cc>operator new</cc>.
-			delete_name{"delete"}, ///< The name of <cc>operator delete</cc>.
-			array_new_name{"array_new"}, ///< The name of <cc>operator new[]</cc>.
-			array_delete_name{"array_delete"}, ///< The name of <cc>operator delete[]</cc>.
-			plus_name{"add"}, ///< The name of \p operator+.
-			minus_name{"subtract"}, ///< The name of \p operator-.
-			star_name{"multiply"}, ///< The name of \p operator*.
-			slash_name{"divide"}, ///< The name of \p operator/.
-			percent_name{"mod"}, ///< The name of \p operator%.
-			caret_name{"bitwise_xor"}, ///< The name of \p operator^.
-			amp_name{"bitwise_and"}, ///< The name of \p operator&.
-			pipe_name{"bitwise_or"}, ///< The name of \p operator|.
-			tilde_name{"bitwise_not"}, ///< The name of \p operator~.
-			exclaim_name{"not"}, ///< The name of \p operator!.
-			equal_name{"assign"}, ///< The name of \p operator=.
-			less_name{"less"}, ///< The name of \p operator<.
-			greater_name{"greater"}, ///< The name of \p operator>.
-			plus_equal_name{"add_inplace"}, ///< The name of \p operator+=.
-			minus_equal_name{"subtract_inplace"}, ///< The name of \p operator-=.
-			star_equal_name{"multiply_inplace"}, ///< The name of \p operator*=.
-			slash_equal_name{"divide_inplace"}, ///< The name of \p operator/=.
-			percent_equal_name{"mod_inplace"}, ///< The name of \p operator%=.
-			caret_equal_name{"bitwise_xor_inplace"}, ///< The name of \p operator^=.
-			amp_equal_name{"bitwise_and_inplace"}, ///< The name of \p operator&=.
-			pipe_equal_name{"bitwise_or_inplace"}, ///< The name of \p operator|=.
-			less_less_name{"left_shift"}, ///< The name of \p operator<<.
-			greater_greater_name{"right_shift"}, ///< The name of \p operator>>.
-			less_less_equal_name{"left_shift_inplace"}, ///< The name of \p operator<<=.
-			greater_greater_equal_name{"right_shift_inplace"}, ///< The name of \p operator>>=.
-			equal_equal_name{"equal"}, ///< The name of \p operator==.
-			exclaim_equal_name{"not_equal"}, ///< The name of \p operator!=.
-			less_equal_name{"less_equal"}, ///< The name of \p operator<=.
-			greater_equal_name{"greater_equal"}, ///< The name of \p operator>=.
-			spaceship_name{"spaceship"}, ///< The name of \p operator<=>.
-			amp_amp_name{"and"}, ///< The name of \p operator&&.
-			pipe_pipe_name{"or"}, ///< The name of \p operator||.
-			plus_plus_name{"increment"}, ///< The name of \p operator++.
-			minus_minus_name{"decrement"}, ///< The name of \p operator--.
-			comma_name{"comma"}, ///< The name of \p operator,.
-			arrow_star_name{"access_memptr"}, ///< The name of \p operator->*.
-			arrow_name{"access"}, ///< The name of \p operator->.
-			call_name{"call"}, ///< The name of \p operator().
-			subscript_name{"index"}, ///< The name of \p operator[].
-			coawait_name{"co_await"}; ///< The name of <cc>operator co_await</cc>.
+			new_name{ "new" }, ///< The name of <cc>operator new</cc>.
+			delete_name{ "delete" }, ///< The name of <cc>operator delete</cc>.
+			array_new_name{ "array_new" }, ///< The name of <cc>operator new[]</cc>.
+			array_delete_name{ "array_delete" }, ///< The name of <cc>operator delete[]</cc>.
+			plus_name{ "add" }, ///< The name of \p operator+.
+			minus_name{ "subtract" }, ///< The name of \p operator-.
+			star_name{ "multiply" }, ///< The name of \p operator*.
+			slash_name{ "divide" }, ///< The name of \p operator/.
+			percent_name{ "mod" }, ///< The name of \p operator%.
+			caret_name{ "bitwise_xor" }, ///< The name of \p operator^.
+			amp_name{ "bitwise_and" }, ///< The name of \p operator&.
+			pipe_name{ "bitwise_or" }, ///< The name of \p operator|.
+			tilde_name{ "bitwise_not" }, ///< The name of \p operator~.
+			exclaim_name{ "not" }, ///< The name of \p operator!.
+			equal_name{ "assign" }, ///< The name of \p operator=.
+			less_name{ "less" }, ///< The name of \p operator<.
+			greater_name{ "greater" }, ///< The name of \p operator>.
+			plus_equal_name{ "add_inplace" }, ///< The name of \p operator+=.
+			minus_equal_name{ "subtract_inplace" }, ///< The name of \p operator-=.
+			star_equal_name{ "multiply_inplace" }, ///< The name of \p operator*=.
+			slash_equal_name{ "divide_inplace" }, ///< The name of \p operator/=.
+			percent_equal_name{ "mod_inplace" }, ///< The name of \p operator%=.
+			caret_equal_name{ "bitwise_xor_inplace" }, ///< The name of \p operator^=.
+			amp_equal_name{ "bitwise_and_inplace" }, ///< The name of \p operator&=.
+			pipe_equal_name{ "bitwise_or_inplace" }, ///< The name of \p operator|=.
+			less_less_name{ "left_shift" }, ///< The name of \p operator<<.
+			greater_greater_name{ "right_shift" }, ///< The name of \p operator>>.
+			less_less_equal_name{ "left_shift_inplace" }, ///< The name of \p operator<<=.
+			greater_greater_equal_name{ "right_shift_inplace" }, ///< The name of \p operator>>=.
+			equal_equal_name{ "equal" }, ///< The name of \p operator==.
+			exclaim_equal_name{ "not_equal" }, ///< The name of \p operator!=.
+			less_equal_name{ "less_equal" }, ///< The name of \p operator<=.
+			greater_equal_name{ "greater_equal" }, ///< The name of \p operator>=.
+			spaceship_name{ "spaceship" }, ///< The name of \p operator<=>.
+			amp_amp_name{ "and" }, ///< The name of \p operator&&.
+			pipe_pipe_name{ "or" }, ///< The name of \p operator||.
+			plus_plus_name{ "increment" }, ///< The name of \p operator++.
+			minus_minus_name{ "decrement" }, ///< The name of \p operator--.
+			comma_name{ "comma" }, ///< The name of \p operator,.
+			arrow_star_name{ "access_memptr" }, ///< The name of \p operator->*.
+			arrow_name{ "access" }, ///< The name of \p operator->.
+			call_name{ "call" }, ///< The name of \p operator().
+			subscript_name{ "index" }, ///< The name of \p operator[].
+			coawait_name{ "co_await" }; ///< The name of <cc>operator co_await</cc>.
 
 		/// Retrieves the name that corresponds to the given overloaded operator.
 		[[nodiscard]] std::string_view get_operator_name(clang::OverloadedOperatorKind op) const {

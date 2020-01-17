@@ -4,61 +4,41 @@
 /// Implementation of actual exporting the entities.
 
 namespace apigen {
-	// exporting of internal types
-	void _write_internal_pointer_and_qualifiers( // TODO remove this
-		std::ostream &out, reference_kind ref, const std::vector<qualifier> &quals
-	) {
-		for (auto it = quals.rbegin(); it != --quals.rend(); ++it) {
-			out << *it << "*";
-		}
-		out << quals.front();
-		switch (ref) { // ampersand
-		case reference_kind::reference:
-			out << "&";
-			break;
-		case reference_kind::rvalue_reference:
-			out << "&&";
-			break;
-		default:
-			break;
-		}
-	}
-
 	// exporting of api types
-	std::string_view exporter::_get_exported_type_name(const clang::Type *type, entity *entity) const {
+	std::string_view exporter::get_exported_type_name(const clang::Type *type, entity *entity) const {
 		if (auto *builtin = llvm::dyn_cast<clang::BuiltinType>(type)) {
 			// still use the policy for internal names so that the code compiles without problems
-			return to_string_view(builtin->getName(printer.policy));
+			return to_string_view(builtin->getName(printing_policy));
 		} else if (llvm::isa<clang::EnumType>(type)) {
-			auto it = _enum_names.find(cast<entities::enum_entity>(entity));
-			assert_true(it != _enum_names.end());
-			return it->second.name.get_cached();
+			return _enum_names.at(cast<entities::enum_entity>(entity)).name.get_cached();
 		} else if (llvm::isa<clang::RecordType>(type)) {
-			auto it = _record_names.find(cast<entities::record_entity>(entity));
-			assert_true(it != _record_names.end());
-			return it->second.name.get_cached();
+			return _record_names.at(cast<entities::record_entity>(entity)).name.get_cached();
 		}
 		return "$UNSUPPORTED";
 	}
 
-	void exporter::_export_api_parameter_type(cpp_writer &writer, const qualified_type &type) const {
-		writer.write_fmt("{} ", _get_exported_type_name(type.type, type.type_entity));
+	void exporter::export_api_parameter_type(cpp_writer &writer, const qualified_type &type, bool mark_move) const {
+		writer.write_fmt("{} ", get_exported_type_name(type.type, type.type_entity));
 		if (type.is_reference_or_pointer()) {
-			_export_api_pointers_and_qualifiers(writer, type.ref_kind, type.qualifiers);
+			export_api_pointers_and_qualifiers(writer, type.ref_kind, type.qualifiers);
 		} else {
 			if (auto *complex_ty = dyn_cast<entities::record_entity>(type.type_entity)) {
 				if (!complex_ty->has_move_constructor()) {
 					writer.write("const "); // this parameter will be copied
+				} else {
+					if (mark_move) {
+						writer.write(APIGEN_STR(APIGEN_MOVED)); // an empty marker that indicates this parameter is moved
+					}
 				}
 				writer.write("*");
 			} // nothing to do for other primitive types
 		}
 	}
 
-	void exporter::_export_api_return_type(cpp_writer &writer, const qualified_type &type) const {
-		writer.write_fmt("{} ", _get_exported_type_name(type.type, type.type_entity));
+	void exporter::export_api_return_type(cpp_writer &writer, const qualified_type &type) const {
+		writer.write_fmt("{} ", get_exported_type_name(type.type, type.type_entity));
 		if (type.is_reference_or_pointer()) {
-			_export_api_pointers_and_qualifiers(writer, type.ref_kind, type.qualifiers);
+			export_api_pointers_and_qualifiers(writer, type.ref_kind, type.qualifiers);
 		} else {
 			if (type.type_entity && isa<entities::record_entity>(*type.type_entity)) {
 				writer.write('*');
@@ -69,7 +49,7 @@ namespace apigen {
 	void exporter::_export_api_field_getter_return_type_pointers_and_qualifiers(
 		cpp_writer &writer, const qualified_type &type, entities::field_kind kind, bool is_const
 	) {
-		_export_api_pointers_and_qualifiers(writer, type.ref_kind, type.qualifiers);
+		export_api_pointers_and_qualifiers(writer, type.ref_kind, type.qualifiers);
 		// const fields already have this const in their qualifiers
 		if (kind == entities::field_kind::normal_field && is_const) {
 			writer.write("const ");
@@ -80,19 +60,7 @@ namespace apigen {
 		}
 	}
 
-	bool exporter::_maybe_export_api_return_type_input(cpp_writer &writer, const qualified_type &type) const {
-		if (!type.is_reference_or_pointer()) {
-			if (type.type_entity && isa<entities::record_entity>(*type.type_entity)) {
-				writer
-					.new_line()
-					.write("void *");
-				return true;
-			}
-		}
-		return false;
-	}
-
-	void exporter::_export_api_pointers_and_qualifiers(
+	void exporter::export_api_pointers_and_qualifiers(
 		cpp_writer &writer, reference_kind ref, const std::vector<qualifier> &quals
 	) {
 		for (auto it = quals.rbegin(); it != --quals.rend(); ++it) {
@@ -124,35 +92,33 @@ namespace apigen {
 			.new_line()
 			.write_fmt(
 				"typedef {} {};",
-				_get_exported_type_name(entity->get_integer_type(), nullptr),
+				get_exported_type_name(entity->get_integer_type(), nullptr),
 				name.name.get_cached()
 			);
 	}
 
 	void exporter::_export_api_type(cpp_writer &writer, const record_naming &name) {
-		writer.write("typedef struct ");
-		{
-			auto scope = writer.begin_scope(cpp_writer::braces_scope);
-		}
-		writer.write_fmt(" {};", name.name.get_cached());
+		writer.write_fmt("typedef struct {0} {0};", name.name.get_cached());
 	}
 
 	void exporter::_export_api_function_pointer_definition(
 		cpp_writer &writer, entities::function_entity *entity, const function_naming &name
 	) const {
 		if (auto &return_type = entity->get_api_return_type()) {
-			_export_api_return_type(writer, return_type.value());
+			export_api_return_type(writer, return_type.value());
 		}
 		writer.write_fmt("(*{})", name.api_name.get_cached());
 		{
 			auto scope = writer.begin_scope(cpp_writer::parentheses_scope);
 			for (auto &&param : entity->get_parameters()) {
 				writer.new_line();
-				_export_api_parameter_type(writer, param.type);
+				export_api_parameter_type(writer, param.type, true);
 				writer.maybe_separate(",");
 			}
 			if (auto &return_type = entity->get_api_return_type()) {
-				_maybe_export_api_return_type_input(writer, return_type.value());
+				if (return_type->is_record_type()) {
+					writer.write("void*");
+				}
 			}
 		}
 		writer.write(";");
@@ -173,7 +139,7 @@ namespace apigen {
 
 		// only normal fields have non-const getters
 		if (entity->get_field_kind() == entities::field_kind::normal_field) {
-			writer.write_fmt("{} ", _get_exported_type_name(type.type, type.type_entity));
+			writer.write_fmt("{} ", get_exported_type_name(type.type, type.type_entity));
 			_export_api_field_getter_return_type_pointers_and_qualifiers(
 				writer, type, entity->get_field_kind(), false
 			);
@@ -182,7 +148,7 @@ namespace apigen {
 				.new_line();
 		}
 
-		writer.write_fmt("{} ", _get_exported_type_name(type.type, type.type_entity));
+		writer.write_fmt("{} ", get_exported_type_name(type.type, type.type_entity));
 		_export_api_field_getter_return_type_pointers_and_qualifiers(
 			writer, type, entity->get_field_kind(), true
 		);
@@ -198,7 +164,7 @@ namespace apigen {
 		if (type.is_reference_or_pointer()) { // passing a reference
 			cpp_writer::scope_token scope;
 			if (type.ref_kind == reference_kind::rvalue_reference) { // cast to rvalue reference
-				writer.write_fmt("static_cast<{}>", printer.get_internal_qualified_type_name(type));
+				writer.write_fmt("static_cast<{}>", writer.name_printer.get_internal_qualified_type_name(type));
 				scope = writer.begin_scope(cpp_writer::parentheses_scope);
 			}
 			if (type.is_reference()) { // dereference if necessary
@@ -209,7 +175,7 @@ namespace apigen {
 				// for references, first cast to the corresponding pointer type
 				writer.write_fmt(
 					"reinterpret_cast<{}>({})",
-					printer.get_internal_qualified_type_name(
+					writer.name_printer.get_internal_qualified_type_name(
 						type.type, reference_kind::none, { qualifier::const_qual },
 						type.qualifiers.data(), type.qualifiers.size()
 					),
@@ -218,7 +184,7 @@ namespace apigen {
 			} else {
 				// pass pointers directly
 				writer.write_fmt(
-					"reinterpret_cast<{}>({})", printer.get_internal_qualified_type_name(type), param
+					"reinterpret_cast<{}>({})", writer.name_printer.get_internal_qualified_type_name(type), param
 				);
 			}
 		} else { // passing an object
@@ -228,11 +194,11 @@ namespace apigen {
 				if (complex_ty->has_move_constructor()) { // move
 					writer.write("::std::move");
 					possible_move = writer.begin_scope(cpp_writer::parentheses_scope);
-					cast_type = printer.get_internal_qualified_type_name(
+					cast_type = writer.name_printer.get_internal_qualified_type_name(
 						type.type, reference_kind::none, { qualifier::none, qualifier::none }
 					);
 				} else {
-					cast_type = printer.get_internal_qualified_type_name(
+					cast_type = writer.name_printer.get_internal_qualified_type_name(
 						type.type, reference_kind::none, { qualifier::none, qualifier::const_qual }
 					);
 				}
@@ -240,7 +206,7 @@ namespace apigen {
 			} else { // primitive types
 				if (type.type->isEnumeralType()) { // cast enums
 					writer.write_fmt(
-						"static_cast<{}>({})", printer.get_internal_type_name(type.type), param
+						"static_cast<{}>({})", writer.name_printer.get_internal_type_name(type.type), param
 					);
 				} else { // pass directly
 					writer.write(param);
@@ -251,6 +217,50 @@ namespace apigen {
 
 
 	// exporting of internal function implementations
+	void exporter::_export_plain_function_call(
+		cpp_writer &writer, entities::function_entity *entity,
+		const std::vector<std::string> &parameter_names
+	) const {
+		auto param_it = entity->get_parameters().begin();
+		auto param_name_it = parameter_names.begin();
+		if (auto *method_ent = dyn_cast<entities::method_entity>(entity)) {
+			auto *method_decl = llvm::cast<clang::CXXMethodDecl>(method_ent->get_declaration());
+			auto *decl = method_decl->getParent();
+			if (!isa<entities::constructor_entity>(*method_ent)) {
+				// if this is a method and not a constructor
+				if (method_ent->is_static()) { // export static member function call
+					writer.write_fmt("{}::", writer.name_printer.get_internal_entity_name(decl));
+				} else { // non-static, export member function call
+					assert_true(param_it->type.qualifiers.size() == 2);
+					assert_true(param_it->type.ref_kind == reference_kind::none);
+					// the first parameter is the "this" parameter
+					writer.write_fmt(
+						"reinterpret_cast<{} {}*>({})->",
+						writer.name_printer.get_internal_entity_name(decl),
+						param_it->type.qualifiers.back(),
+						*param_name_it
+					);
+					++param_it;
+					++param_name_it;
+				}
+				// here scope is unnecessary
+				writer.write(writer.name_printer.get_internal_function_name(method_decl));
+			} else { // constructor, write class name
+				writer.write(writer.name_printer.get_internal_entity_name(decl));
+			}
+		} else { // normal function, print function name with scope
+			writer.write(writer.name_printer.get_internal_entity_name(entity->get_declaration()));
+		}
+		{ // parameters
+			auto param_scope = writer.begin_scope(cpp_writer::parentheses_scope);
+			for (; param_it != entity->get_parameters().end(); ++param_it, ++param_name_it) {
+				writer.new_line();
+				_export_pass_parameter(writer, param_it->type, *param_name_it);
+				writer.maybe_separate(",");
+			}
+		}
+	}
+
 	void exporter::_export_function_impl(
 		cpp_writer &writer, entities::function_entity *entity, const function_naming &name
 	) const {
@@ -260,7 +270,7 @@ namespace apigen {
 
 		writer.write("inline static ");
 		if (auto &return_type = entity->get_api_return_type()) {
-			_export_api_return_type(writer, return_type.value());
+			export_api_return_type(writer, return_type.value());
 		}
 		writer.write_fmt("{}", name.impl_name.get_cached());
 		bool complex_return = false; // indicates whether the function call should be wrapped in a placement new
@@ -268,7 +278,7 @@ namespace apigen {
 			auto scope = writer.begin_scope(cpp_writer::parentheses_scope);
 			for (auto &&param : entity->get_parameters()) {
 				writer.new_line();
-				_export_api_parameter_type(writer, param.type);
+				export_api_parameter_type(writer, param.type, false);
 				param_tokens.emplace_back(alloc.allocate_function_parameter(param.name, ""));
 				parameters.emplace_back(param_tokens.back()->get_name());
 				writer
@@ -276,10 +286,11 @@ namespace apigen {
 					.maybe_separate(",");
 			}
 			if (auto &return_type = entity->get_api_return_type()) {
-				if (_maybe_export_api_return_type_input(writer, return_type.value())) {
+				if (return_type->is_record_type()) {
+					// additional input pointing to the memory block that receives the returned object
 					param_tokens.emplace_back(alloc.allocate_function_parameter("output", ""));
 					parameters.emplace_back(param_tokens.back()->get_name());
-					writer.write(parameters.back());
+					writer.write_fmt("void *{}", parameters.back());
 					complex_return = true;
 				}
 			}
@@ -290,78 +301,47 @@ namespace apigen {
 
 			// the actual function call
 			writer.new_line();
-			{ // the optional placement new or *_cast scope
-				cpp_writer::scope_token new_or_cast_scope;
-				if (complex_return) {
-					auto *return_type = entity->get_api_return_type().value().type;
-					writer.write_fmt(
-						"new ({}) {}",
-						parameters.back(), printer.get_internal_type_name(return_type)
-					);
-					// for constructors, this will be directly followed by the argument list
-					if (!isa<entities::constructor_entity>(*entity)) {
-						// otherwise the call to the actual function need to be surrounded by parentheses
-						new_or_cast_scope = writer.begin_scope(cpp_writer::parentheses_scope);
-					}
-				} else if (auto &return_type = entity->get_api_return_type()) { // simple return
-					if (!return_type->is_void()) {
-						writer.write("return ");
-						if (return_type->is_reference_or_pointer()) {
-							if (!return_type->type->isBuiltinType()) { // cast the pointer to the correct type
-								writer.write("reinterpret_cast<");
-								_export_api_return_type(writer, return_type.value());
-								writer.write(">");
-								new_or_cast_scope = writer.begin_scope(cpp_writer::parentheses_scope);
-							}
-							if (return_type->is_reference()) { // for references, pointers are returned
-								writer.write("&");
-							}
-						} else {
-							if (auto *enum_ent = dyn_cast<entities::enum_entity>(return_type->type_entity)) {
-								// static_cast the enum
-								auto it = _enum_names.find(enum_ent);
-								assert_true(it != _enum_names.end());
-								writer.write_fmt("static_cast<{}>", it->second.name.get_cached());
-								new_or_cast_scope = writer.begin_scope(cpp_writer::parentheses_scope);
-							}
+			if (complex_return) {
+				auto *return_type = entity->get_api_return_type().value().type;
+				writer.write_fmt("new ({}) ", parameters.back());
+				if (isa<entities::constructor_entity>(*entity)) {
+					// for constructors, this should be directly followed by the constructor call
+					_export_plain_function_call(writer, entity, parameters);
+				} else {
+					// otherwise the call to the actual function need to be surrounded by parentheses
+					writer.write(writer.name_printer.get_internal_type_name(return_type));
+					auto new_scope = writer.begin_scope(cpp_writer::parentheses_scope);
+					_export_plain_function_call(writer, entity, parameters);
+				}
+			} else { // simple or no return
+				auto &return_type = entity->get_api_return_type();
+				if (return_type && !return_type->is_void()) { // simple return
+					writer.write("return ");
+					if (return_type->is_reference_or_pointer()) { // references and pointers
+						cpp_writer::scope_token cast_scope;
+						if (!return_type->type->isBuiltinType()) { // cast the pointer to the correct type
+							writer.write("reinterpret_cast<");
+							export_api_return_type(writer, return_type.value());
+							writer.write(">");
+							cast_scope = writer.begin_scope(cpp_writer::parentheses_scope);
+						}
+						if (return_type->is_reference()) { // for references, pointers are returned
+							writer.write("&");
+						}
+						_export_plain_function_call(writer, entity, parameters);
+					} else { // plain builtin object or enum
+						if (auto *enum_ent = dyn_cast<entities::enum_entity>(return_type->type_entity)) {
+							// enums need static_cast
+							auto &enum_name = _enum_names.at(enum_ent);
+							writer.write_fmt("static_cast<{}>", enum_name.name.get_cached());
+							auto cast_scope = writer.begin_scope(cpp_writer::parentheses_scope);
+							_export_plain_function_call(writer, entity, parameters);
+						} else { // plain builtin data types such as int, float, etc.
+							_export_plain_function_call(writer, entity, parameters);
 						}
 					}
-				}
-
-				auto param_it = entity->get_parameters().begin();
-				auto param_name_it = parameters.begin();
-				if (auto *method_ent = dyn_cast<entities::method_entity>(entity)) {
-					if (!isa<entities::constructor_entity>(*method_ent)) {
-						// if this is a method and not a constructor
-						auto *method_decl = llvm::cast<clang::CXXMethodDecl>(method_ent->get_declaration());
-						auto *decl = method_decl->getParent();
-						if (method_ent->is_static()) { // export static member function call
-							writer.write_fmt("{}::", printer.get_internal_entity_name(decl));
-						} else { // non-static, export member function call
-							assert_true(param_it->type.qualifiers.size() == 2);
-							assert_true(param_it->type.ref_kind == reference_kind::none);
-							writer.write_fmt(
-								"reinterpret_cast<{} {}*>({})->",
-								printer.get_internal_entity_name(decl),
-								param_it->type.qualifiers.back(),
-								*param_name_it
-							);
-							++param_it;
-							++param_name_it;
-						}
-						// here scope is unnecessary
-						writer.write(printer.get_internal_function_name(method_decl));
-					}
-				} else { // normal function, print function name with scope
-					writer.write(printer.get_internal_entity_name(entity->get_declaration()));
-				}
-				{ // parameters
-					auto scope2 = writer.begin_scope(cpp_writer::parentheses_scope);
-					for (; param_it != entity->get_parameters().end(); ++param_it, ++param_name_it) {
-						writer.new_line();
-						_export_pass_parameter(writer, param_it->type, *param_name_it);
-						writer.maybe_separate(",");
-					}
+				} else { // no return
+					_export_plain_function_call(writer, entity, parameters);
 				}
 			}
 			writer.write(";");
@@ -385,7 +365,7 @@ namespace apigen {
 		auto &type = entity->get_type();
 		auto parent_it = _record_names.find(entity->get_parent());
 		assert_true(parent_it != _record_names.end());
-		std::string_view exported_type_name = _get_exported_type_name(type.type, type.type_entity);
+		std::string_view exported_type_name = get_exported_type_name(type.type, type.type_entity);
 
 		if (entity->get_field_kind() == entities::field_kind::normal_field) { // non-const getter
 			name_allocator func_scope = name_allocator::from_parent_immutable(_impl_scope);
@@ -415,7 +395,7 @@ namespace apigen {
 					}
 					writer.write_fmt(
 						"&reinterpret_cast<{} *>({})->{}",
-						printer.get_internal_entity_name(entity->get_parent()->get_declaration()),
+						writer.name_printer.get_internal_entity_name(entity->get_parent()->get_declaration()),
 						input->get_name(), to_string_view(entity->get_declaration()->getName())
 					);
 				}
@@ -452,7 +432,7 @@ namespace apigen {
 					}
 					writer.write_fmt(
 						"&reinterpret_cast<{} const *>({})->{}",
-						printer.get_internal_entity_name(entity->get_parent()->get_declaration()),
+						writer.name_printer.get_internal_entity_name(entity->get_parent()->get_declaration()),
 						input->get_name(), to_string_view(entity->get_declaration()->getName())
 					);
 				}
@@ -476,7 +456,7 @@ namespace apigen {
 				.new_line()
 				.write_fmt(
 					"reinterpret_cast<{} *>({})->~{}();",
-					printer.get_internal_entity_name(entity->get_declaration()),
+					writer.name_printer.get_internal_entity_name(entity->get_declaration()),
 					input->get_name(), to_string_view(entity->get_declaration()->getName())
 				);
 		}
@@ -485,7 +465,16 @@ namespace apigen {
 
 	// exporting of whole files
 	void exporter::export_api_header(std::ostream &out) const {
-		cpp_writer writer(out);
+		cpp_writer writer(out, printing_policy);
+
+		// a couple of definitions so that the user doesn't have to #include "apigen_definitions.h"
+		writer
+			.write("#define " APIGEN_STR(APIGEN_MOVED))
+			.new_line()
+			.write("#define " APIGEN_STR(APIGEN_TEMPORARY))
+			.new_line()
+			.new_line();
+
 		for (auto &&[ent, name] : _enum_names) {
 			_export_api_enum_type(writer, ent, name);
 			writer
@@ -519,12 +508,17 @@ namespace apigen {
 				_export_api_field_getter_definitions(writer, ent, name);
 				writer.new_line();
 			}
+			for (auto &&[ent, name] : _custom_func_names) {
+				writer.new_line();
+				ent->export_pointer_declaration(writer, *this, name.api_name.get_cached());
+				writer.new_line();
+			}
 		}
 		writer.write_fmt(" {};", naming->api_struct_name);
 	}
 
 	void exporter::export_host_h(std::ostream &out) const {
-		cpp_writer writer(out);
+		cpp_writer writer(out, printing_policy);
 		writer
 			.write_fmt("struct {};", naming->api_struct_name)
 			.new_line()
@@ -532,8 +526,16 @@ namespace apigen {
 	}
 
 	void exporter::export_host_cpp(std::ostream &out) const {
-		cpp_writer writer(out);
-		writer.write_fmt("class {} ", APIGEN_API_CLASS_NAME_STR);
+		cpp_writer writer(out, printing_policy);
+
+		// custom dependencies
+		for (auto &header : _entities.get_custom_host_dependencies()) {
+			writer
+				.write_fmt("#include <{}>", header)
+				.new_line();
+		}
+
+		writer.write_fmt("struct {} ", APIGEN_API_CLASS_NAME_STR);
 		{
 			auto scope = writer.begin_scope(cpp_writer::braces_scope);
 			writer
@@ -552,6 +554,11 @@ namespace apigen {
 			for (auto &&[ent, name] : _field_names) {
 				writer.new_line();
 				_export_field_getter_impls(writer, ent, name);
+				writer.new_line();
+			}
+			for (auto &&[ent, name] : _custom_func_names) {
+				writer.new_line();
+				ent->export_definition(writer, *this, name.impl_name.get_cached());
 				writer.new_line();
 			}
 		}
@@ -607,6 +614,15 @@ namespace apigen {
 							APIGEN_API_CLASS_NAME_STR, name.const_getter_impl_name.get_cached()
 						);
 				}
+				for (auto &&[func, name] : _custom_func_names) {
+					writer
+						.new_line()
+						.write_fmt(
+							"{}.{} = {}::{};",
+							result_var->get_name(), name.api_name.get_cached(),
+							APIGEN_API_CLASS_NAME_STR, name.impl_name.get_cached()
+						);
+				}
 			}
 		}
 	}
@@ -614,7 +630,7 @@ namespace apigen {
 	/// Type declaration for record type size and alignment data.
 	const std::string_view _size_alignment_type_decl = "const size_t "; // TODO is this good practice?
 	void exporter::export_data_collection_cpp(std::ostream &out) const {
-		cpp_writer writer(out);
+		cpp_writer writer(out, printing_policy);
 
 		writer
 			.write("#include <iostream>")
@@ -624,7 +640,7 @@ namespace apigen {
 		{
 			auto scope = writer.begin_scope(cpp_writer::braces_scope);
 			for (auto &&[rec, name] : _record_names) {
-				std::string internal_name = printer.get_internal_entity_name(rec->get_declaration());
+				std::string internal_name = writer.name_printer.get_internal_entity_name(rec->get_declaration());
 				writer
 					.new_line()
 					.write_fmt(R"(std::cout << "{})", _size_alignment_type_decl)

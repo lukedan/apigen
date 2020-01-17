@@ -146,13 +146,45 @@ namespace apigen {
 				return result;
 			}
 		};
+		/// Contains naming information of an \ref custom_function_entity.
+		struct custom_function_naming {
+			cached_name
+				api_name, ///< The API name of this function.
+				impl_name; ///< The name of this function's implementation.
+
+			/// Constructs a \ref custom_function_naming from the given \ref custom_function_entity.
+			inline static custom_function_naming from_entity(
+				custom_function_entity &ent, naming_convention &conv,
+				name_allocator &global_scope, name_allocator &impl_scope
+			) {
+				custom_function_naming result;
+				auto name = ent.get_suggested_name(conv);
+				result.api_name = cached_name::register_name(global_scope, name);
+				result.impl_name = cached_name::register_name_prefix(impl_scope, "internal_", name);
+				return result;
+			}
+		};
+
+		/// Stores the naming of functions.
+		using function_name_mapping = std::unordered_map<entities::function_entity*, function_naming>;
+		/// Stores the naming of enums.
+		using enum_name_mapping = std::unordered_map<entities::enum_entity*, enum_naming>;
+		/// Stores the naming of records.
+		using record_name_mapping = std::unordered_map<entities::record_entity*, record_naming>;
+		/// Stores the naming of fields.
+		using field_name_mapping = std::unordered_map<entities::field_entity*, field_naming>;
+		/// Stores the naming of custom functions.
+		using custom_function_name_mapping = std::unordered_map<custom_function_entity*, custom_function_naming>;
 
 		/// Initializes \ref internal_printing_policy.
-		explicit exporter(clang::PrintingPolicy policy) :
-			printer(std::move(policy)), _impl_scope(name_allocator::from_parent(_global_scope)) {
+		exporter(clang::PrintingPolicy policy, const entity_registry &reg) :
+			printing_policy(std::move(policy)),
+			_impl_scope(name_allocator::from_parent(_global_scope)),
+			_entities(reg) {
 		}
 		/// Initializes \ref internal_printing_policy and \ref naming.
-		exporter(clang::PrintingPolicy policy, naming_convention &conv) : exporter(std::move(policy)) {
+		exporter(clang::PrintingPolicy policy, naming_convention &conv, const entity_registry &reg) :
+			exporter(std::move(policy), reg) {
 			naming = &conv;
 		}
 
@@ -181,6 +213,11 @@ namespace apigen {
 					}
 				}
 			}
+			for (auto &ent : reg.get_custom_functions()) {
+				_custom_func_names.emplace(ent.get(), custom_function_naming::from_entity(
+					*ent, *naming, _global_scope, _impl_scope
+				));
+			}
 
 			// now freeze all names
 			for (auto &[ent, name] : _function_names) {
@@ -204,6 +241,10 @@ namespace apigen {
 				name.const_getter_impl_name.freeze();
 				name.const_getter_api_name.freeze();
 			}
+			for (auto &[ent, name] : _custom_func_names) {
+				name.api_name.freeze();
+				name.impl_name.freeze();
+			}
 		}
 
 	protected:
@@ -220,6 +261,19 @@ namespace apigen {
 		/// Exports the definition of API field getters.
 		void _export_api_field_getter_definitions(cpp_writer&, entities::field_entity*, const field_naming&) const;
 	public:
+		/// Returns the name of a type used in the API header. The \ref entity will be used only if the type is not a
+		/// built-in type.
+		[[nodiscard]] std::string_view get_exported_type_name(const clang::Type*, entity*) const;
+		/// Exports a type as a return type in the API.
+		void export_api_return_type(cpp_writer&, const qualified_type&) const;
+		/// Exports a type as a parameter in the API header. Reference types will be exported as pointer types, and
+		/// primitive types such as built-in types and enums are exported as-is. If a record type has a move
+		/// constructor, it will be implicitly moved; otherwise it will be copied.
+		void export_api_parameter_type(cpp_writer&, const qualified_type&, bool mark_move) const;
+		/// Exports asterisks and qualifiers for an exported type, converting references to corresponding pointers.
+		static void export_api_pointers_and_qualifiers(
+			cpp_writer &writer, reference_kind ref, const std::vector<qualifier> &quals
+		);
 		/// Exports the API header.
 		void export_api_header(std::ostream&) const;
 
@@ -227,6 +281,20 @@ namespace apigen {
 		void export_host_h(std::ostream&) const;
 
 	protected:
+		/// Exports a function call to the given \ref function_entity. This function does not care about the return
+		/// value.
+		///
+		/// For normal functions, this function exports:
+		/// <code>function_name(parameters)</code>
+		/// For static member functions, this function exports:
+		/// <code>class::function_name(parameters)</code>
+		/// For constructors, this function exports:
+		/// <code>class(parameters)</code>
+		/// For normal member functions, this function exports:
+		/// <code>reinterpret_cast<class_type*>(this_parameter)->function_name(parameters)</code>
+		void _export_plain_function_call(
+			cpp_writer&, entities::function_entity*, const std::vector<std::string>&
+		) const;
 		/// Exports the implementation of the given function.
 		void _export_function_impl(cpp_writer&, entities::function_entity*, const function_naming&) const;
 		/// Exports the implementations of field getters.
@@ -242,39 +310,51 @@ namespace apigen {
 		/// manually add <cc>#include</cc> directives to the fromt of the output file.
 		void export_data_collection_cpp(std::ostream&) const;
 
-		internal_name_printer printer; ///< Printer of internal entities and types.
+		/// Returns \ref _impl_scope.
+		[[nodiscard]] const name_allocator &get_implmentation_scope() const {
+			return _impl_scope;
+		}
+
+		/// Returns \ref _function_names.
+		[[nodiscard]] const function_name_mapping &get_function_names() const {
+			return _function_names;
+		}
+		/// Returns \ref _enum_names.
+		[[nodiscard]] const enum_name_mapping &get_enum_names() const {
+			return _enum_names;
+		}
+		/// Returns \ref _record_names.
+		[[nodiscard]] const record_name_mapping &get_record_names() const {
+			return _record_names;
+		}
+		/// Returns \ref _field_names.
+		[[nodiscard]] const field_name_mapping &get_field_names() const {
+			return _field_names;
+		}
+		/// Returns \ref _custom_func_names.
+		[[nodiscard]] const custom_function_name_mapping &get_custom_function_names() const {
+			return _custom_func_names;
+		}
+
+		clang::PrintingPolicy printing_policy; ///< Printing policy for builtin types.
 		naming_convention *naming = nullptr; ///< The naming convention of exported types and functions.
 	protected:
-		/// Mapping between functions and their exported names.
-		std::unordered_map<entities::function_entity*, function_naming> _function_names;
-		/// Mapping between enums and their exported names.
-		std::unordered_map<entities::enum_entity*, enum_naming> _enum_names;
-		/// Mapping between records and their exported names.
-		std::unordered_map<entities::record_entity*, record_naming> _record_names;
-		/// Mapping between fields and their exported names.
-		std::unordered_map<entities::field_entity*, field_naming> _field_names;
+		function_name_mapping _function_names; ///< Mapping between functions and their exported names.
+		enum_name_mapping _enum_names; ///< Mapping between enums and their exported names.
+		record_name_mapping _record_names; ///< Mapping between records and their exported names.
+		field_name_mapping _field_names; ///< Mapping between fields and their exported names.
+		/// Mapping between custom functions and their exported names.
+		custom_function_name_mapping _custom_func_names;
 		name_allocator
 			_global_scope, ///< The \ref name_allocator for the global scope.
 			_impl_scope; ///< The \ref name_allocator for the scope that contain API implementations.
+		const entity_registry &_entities; ///< The \ref entity_registry.
 
 		// exporting of external types
-		/// Returns the name of a type used in the API header.
-		[[nodiscard]] std::string_view _get_exported_type_name(const clang::Type*, entity*) const;
-		/// Exports a type as a parameter in the API header.
-		void _export_api_parameter_type(cpp_writer&, const qualified_type&) const;
-		/// Exports a type as a return type in the API.
-		void _export_api_return_type(cpp_writer&, const qualified_type&) const;
 		/// Exports pointers and qualifiers for a field getter return type.
 		static void _export_api_field_getter_return_type_pointers_and_qualifiers(
 			cpp_writer&, const qualified_type&, entities::field_kind, bool is_const
 		);
-		/// Exports the additional input for a return value in the API, if one is necessary.
-		///
-		/// \return Whether an additional input is necessary.
-		bool _maybe_export_api_return_type_input(cpp_writer&, const qualified_type&) const;
-
-		/// Exports asterisks and qualifiers for an exported type.
-		static void _export_api_pointers_and_qualifiers(cpp_writer &writer, reference_kind ref, const std::vector<qualifier> &quals);
 
 
 		/// Exports the code used to pass a parameter.

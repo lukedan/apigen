@@ -7,6 +7,9 @@
 #include <set>
 #include <ostream>
 #include <string_view>
+#include <variant>
+
+#include "internal_name_printer.h"
 
 namespace apigen {
 	/// Allocates names for variables.
@@ -222,7 +225,8 @@ namespace apigen {
 			braces_scope{"{", "}"}; ///< A scope surrounded by brackets.
 
 		/// Initializes \ref _out.
-		explicit cpp_writer(std::ostream &out) : _out(out) {
+		explicit cpp_writer(std::ostream &out, clang::PrintingPolicy policy) :
+			name_printer(std::move(policy)), _out(out) {
 		}
 		/// No move construction.
 		cpp_writer(cpp_writer&&) = delete;
@@ -311,6 +315,8 @@ namespace apigen {
 			_separator = text;
 			return *this;
 		}
+
+		internal_name_printer name_printer; ///< The \ref internal_name_printer.
 	protected:
 		/// Records the state of a scope.
 		struct _scope_rec {

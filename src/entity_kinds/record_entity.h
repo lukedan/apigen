@@ -6,9 +6,46 @@
 #include <clang/AST/DeclCXX.h>
 
 #include "../entity.h"
+#include "../types.h"
 #include "user_type_entity.h"
 
+
 namespace apigen::entities {
+	class record_entity;
+
+	/// Custom function used to create a \p std::function from a function pointer.
+	class std_function_custom_function_entity : public custom_function_entity {
+	public:
+		/// Initializes all fields of this entity.
+		explicit std_function_custom_function_entity(record_entity&);
+
+		/// Marks the return type and parameter types as dependencies.
+		void gather_dependencies(entity_registry&, dependency_analyzer&);
+
+		/// Returns the name of the function type's constructor.
+		naming_convention::name_info get_suggested_name(naming_convention&) const override;
+		/// Exports the declaration of the function pointer of this conversion function.
+		void export_pointer_declaration(cpp_writer&, const exporter&, std::string_view) const override;
+		/// Exports the definition of the conversion function.
+		void export_definition(cpp_writer&, const exporter&, std::string_view) const override;
+	protected:
+		qualified_type _return_type; ///< The return type.
+		std::vector<qualified_type> _param_types; ///< Parameter types.
+		record_entity &_entity; ///< The associated \ref record_entity.
+		/// The type of the function (as the template parameter of \p std::function).
+		const clang::FunctionProtoType *_func_type = nullptr;
+
+		/// Exports the parameter list of the function pointer, including the parentheses.
+		void _export_function_pointer_parameters(cpp_writer&, const exporter&, bool) const;
+		/// Exports the call to the function pointer with conversions for all parameters.
+		void _export_function_call(
+			cpp_writer&, const exporter&,
+			std::string_view fptr, const std::vector<std::string>&, std::string_view output, std::string_view user
+		) const;
+		/// Exports a parameter type of the function pointer.
+		void _export_parameter_type(cpp_writer&, const exporter&, const qualified_type&, bool) const;
+	};
+
 	/// An entity that corresponds to a \p class or a \p struct.
 	class record_entity : public user_type_entity {
 	public:
@@ -46,6 +83,18 @@ namespace apigen::entities {
 		/// Returns whether or not this class has a viable move constructor.
 		[[nodiscard]] bool has_move_constructor() const {
 			return _move_constructor;
+		}
+
+		/// Returns \p true if this class is \p std::function.
+		[[nodiscard]] bool is_std_function() const {
+			if (to_string_view(get_declaration()->getName()) == "function") {
+				if (const clang::DeclContext *parent = get_declaration()->getParent()) {
+					if (parent->isStdNamespace()) {
+						return true;
+					}
+				}
+			}
+			return false;
 		}
 
 		/// Returns the declaration of this entity.
