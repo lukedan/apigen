@@ -23,7 +23,7 @@ namespace apigen::entities {
 		void gather_dependencies(entity_registry&, dependency_analyzer&);
 
 		/// Returns the name of the function type's constructor.
-		naming_convention::name_info get_suggested_name(naming_convention&) const override;
+		naming_convention::name_info get_suggested_name(naming_convention&, const exporter&) const override;
 		/// Exports the declaration of the function pointer of this conversion function.
 		void export_pointer_declaration(cpp_writer&, const exporter&, std::string_view) const override;
 		/// Exports the definition of the conversion function.
@@ -44,6 +44,35 @@ namespace apigen::entities {
 		) const;
 		/// Exports a parameter type of the function pointer.
 		void _export_parameter_type(cpp_writer&, const exporter&, const qualified_type&, bool) const;
+	};
+
+	/// Custom function used to perform \p dynamic_cast operations.
+	class dynamic_cast_custom_function_entity : public custom_function_entity {
+	public:
+		/// Initializes \ref _entity and \ref _base_type.
+		dynamic_cast_custom_function_entity(record_entity &ent, record_entity &base, bool);
+
+		/// Marks the base class as a dependency.
+		void gather_dependencies(entity_registry&, dependency_analyzer&);
+
+		/// Returns the suggested name of this \p dynamic_cast function.
+		naming_convention::name_info get_suggested_name(naming_convention&, const exporter&) const override;
+		/// Exports the declaration of the function pointer.
+		void export_pointer_declaration(cpp_writer&, const exporter&, std::string_view) const override;
+		/// Exports the definition of this function.
+		void export_definition(cpp_writer&, const exporter&, std::string_view) const override;
+	protected:
+		record_entity
+			&_entity, ///< The entity.
+			&_base_type; ///< The base type to cast from.
+		bool _const = false; ///< Indicates whether this dynamic cast function is for const objects.
+
+		/// Returns a const qualifier if \ref _const is \p true.
+		std::string_view _get_qualifier() const {
+			return _const ? " const" : "";
+		}
+		/// Returns the exported name of the given \ref record_entity.
+		std::string_view _get_record_name(const exporter&, record_entity&) const;
 	};
 
 	/// An entity that corresponds to a \p class or a \p struct.

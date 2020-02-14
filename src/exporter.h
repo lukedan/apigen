@@ -155,10 +155,11 @@ namespace apigen {
 			/// Constructs a \ref custom_function_naming from the given \ref custom_function_entity.
 			inline static custom_function_naming from_entity(
 				custom_function_entity &ent, naming_convention &conv,
-				name_allocator &global_scope, name_allocator &impl_scope
+				name_allocator &global_scope, name_allocator &impl_scope,
+				const exporter &ex
 			) {
 				custom_function_naming result;
-				auto name = ent.get_suggested_name(conv);
+				auto name = ent.get_suggested_name(conv, ex);
 				result.api_name = cached_name::register_name(global_scope, name);
 				result.impl_name = cached_name::register_name_prefix(impl_scope, "internal_", name);
 				return result;
@@ -213,13 +214,7 @@ namespace apigen {
 					}
 				}
 			}
-			for (auto &ent : reg.get_custom_functions()) {
-				_custom_func_names.emplace(ent.get(), custom_function_naming::from_entity(
-					*ent, *naming, _global_scope, _impl_scope
-				));
-			}
-
-			// now freeze all names
+			// freeze all non-custom entity names so that they can be used by custom function entities
 			for (auto &[ent, name] : _function_names) {
 				name.api_name.freeze();
 				name.impl_name.freeze();
@@ -241,6 +236,15 @@ namespace apigen {
 				name.const_getter_impl_name.freeze();
 				name.const_getter_api_name.freeze();
 			}
+
+			// generate names for custom function entities
+			for (auto &ent : reg.get_custom_functions()) {
+				_custom_func_names.emplace(ent.get(), custom_function_naming::from_entity(
+					*ent, *naming, _global_scope, _impl_scope, *this
+				));
+			}
+
+			// freeze names for custom function names
 			for (auto &[ent, name] : _custom_func_names) {
 				name.api_name.freeze();
 				name.impl_name.freeze();

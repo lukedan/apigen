@@ -166,7 +166,7 @@ namespace apigen {
 		virtual ~custom_function_entity() = default;
 
 		/// Returns the suggested name of this function.
-		virtual naming_convention::name_info get_suggested_name(naming_convention&) const = 0;
+		virtual naming_convention::name_info get_suggested_name(naming_convention&, const exporter&) const = 0;
 		/// Exports the declaration of the function pointer of this function.
 		virtual void export_pointer_declaration(cpp_writer&, const exporter&, std::string_view) const = 0;
 		/// Exports the definition of this function.

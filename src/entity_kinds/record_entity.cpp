@@ -3,6 +3,8 @@
 /// \file
 /// Implementation of certain methods of \ref apigen::entities::record_entity.
 
+#include <stack>
+
 #include "../cpp_writer.h"
 #include "../dependency_analyzer.h"
 #include "../entity_registry.h"
@@ -35,11 +37,11 @@ namespace apigen::entities {
 	}
 
 	naming_convention::name_info std_function_custom_function_entity::get_suggested_name(
-		naming_convention &conv
+		naming_convention&, const exporter &ex
 	) const {
-		auto res = conv.get_record_name(_entity);
-		res.name += "_from_raw";
-		return res;
+		naming_convention::name_info info;
+		info.name = std::string(ex.get_record_names().at(&_entity).name.get_cached()) + "_from_raw";
+		return info;
 	}
 
 	void std_function_custom_function_entity::_export_parameter_type(
@@ -304,6 +306,81 @@ namespace apigen::entities {
 	}
 
 
+	dynamic_cast_custom_function_entity::dynamic_cast_custom_function_entity(
+		record_entity &ent, record_entity &base, bool c
+	) : _entity(ent), _base_type(base), _const(c) {
+	}
+
+	void dynamic_cast_custom_function_entity::gather_dependencies(
+		entity_registry &reg, dependency_analyzer &dep
+	) {
+		dep.try_queue(_base_type);
+	}
+
+	naming_convention::name_info dynamic_cast_custom_function_entity::get_suggested_name(
+		naming_convention&, const exporter &ex
+	) const {
+		naming_convention::name_info info;
+		info.name =
+			(_const ? "dynamic_cast_" : "dynamic_cast_const_") +
+			std::string(ex.get_record_names().at(&_entity).name.get_cached());
+		info.disambiguation = "_from_" + std::string(ex.get_record_names().at(&_base_type).name.get_cached());
+		return info;
+	}
+
+	void dynamic_cast_custom_function_entity::export_pointer_declaration(
+		cpp_writer &writer, const exporter &exporter, std::string_view name
+	) const {
+		std::string_view q = _get_qualifier();
+		writer.write_fmt(
+			"{}{}*(*{})({}{}*);",
+			_get_record_name(exporter, _entity), q, name,
+			_get_record_name(exporter, _base_type), q
+		);
+	}
+
+	void dynamic_cast_custom_function_entity::export_definition(
+		cpp_writer &writer, const exporter &ex, std::string_view name
+	) const {
+		name_allocator alloc = name_allocator::from_parent_immutable(ex.get_implmentation_scope());
+		name_allocator::token input_token;
+		std::string input_name;
+
+		input_token = alloc.allocate_function_parameter("in", "");
+		input_name = input_token->get_name();
+
+		std::string_view
+			q = _get_qualifier(),
+			input_type = _get_record_name(ex, _base_type),
+			output_type = _get_record_name(ex, _entity);
+
+		writer.write_fmt("inline static {}{} *{}({}{} *{}) ", output_type, q, name, input_type, q, input_name);
+		{ // function body
+			auto scope = writer.begin_scope(cpp_writer::braces_scope);
+			std::string
+				internal_input_ty = writer.name_printer.get_internal_type_name(
+					_base_type.get_declaration()->getTypeForDecl()
+				),
+				internal_output_ty = writer.name_printer.get_internal_type_name(
+					_entity.get_declaration()->getTypeForDecl()
+				);
+			writer
+				.new_line()
+				.write_fmt(
+					"return reinterpret_cast<{}{}*>(dynamic_cast<{}{}*>(reinterpret_cast<{}{}*>({})));",
+					output_type, q, internal_output_ty, q,
+					internal_input_ty, q, input_name
+				);
+		}
+	}
+
+	std::string_view dynamic_cast_custom_function_entity::_get_record_name(
+		const exporter &ex, record_entity &rec
+	) const {
+		return ex.get_record_names().at(&_entity).name.get_cached();
+	}
+
+
 	bool record_entity::is_move_constructor(clang::CXXConstructorDecl *decl) {
 		// ensure that this constructor accepts one parameter
 		if (decl->parameters().empty()) {
@@ -376,7 +453,38 @@ namespace apigen::entities {
 			}
 		}
 
-		if (is_std_function()) { // special handling of std::function
+		// dynamic_cast
+		if (def_decl->isPolymorphic()) { // some classes can inherit from others while having no virtual function
+			std::stack<record_entity*> base_stack;
+			std::set<record_entity*> bases; // top-level bases with no base classes themselves
+			base_stack.emplace(this);
+			while (!base_stack.empty()) {
+				record_entity *current_ent = base_stack.top();
+				base_stack.pop();
+				clang::CXXRecordDecl *current = current_ent->get_declaration()->getDefinition();
+
+				if (current->getNumBases() > 0) {
+					for (clang::CXXBaseSpecifier &base : current->bases()) {
+						entity *ent = reg.find_or_register_parsed_entity(base.getType()->getAsCXXRecordDecl());
+						base_stack.emplace(cast<record_entity>(ent));
+					}
+				} else {
+					bases.emplace(current_ent);
+				}
+			}
+			for (record_entity *base : bases) {
+				auto
+					nonconst_func = std::make_unique<dynamic_cast_custom_function_entity>(*this, *base, false),
+					const_func = std::make_unique<dynamic_cast_custom_function_entity>(*this, *base, true);
+				nonconst_func->gather_dependencies(reg, queue);
+				const_func->gather_dependencies(reg, queue);
+				reg.register_custom_function(std::move(nonconst_func));
+				reg.register_custom_function(std::move(const_func));
+			}
+		}
+
+		// special handling of std::function
+		if (is_std_function()) {
 			auto custom_ent = std::make_unique<std_function_custom_function_entity>(*this);
 			custom_ent->gather_dependencies(reg, queue);
 			reg.register_custom_function(std::move(custom_ent));
